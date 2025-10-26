@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""
+Interactive interface for running web scraping spiders.
+Supports both URL collection and listing detail extraction.
+"""
+
 import sys
 import os
 import pathlib
@@ -90,7 +95,7 @@ def get_url(prompt, default=None):
 
 def list_available_csvs():
     """List all available CSV files"""
-    PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
+    PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[0]
     urls_dir = PROJECT_ROOT / "outputs" / "urls"
 
     if not urls_dir.exists():
