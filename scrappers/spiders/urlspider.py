@@ -32,9 +32,29 @@ class urlspiderSpider(scrapy.Spider):
         },
     }
 
-    startPage = 1
-    maxPage = 1  # Maximum page number
-    baseUrl = "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
+    def __init__(self, baseUrl=None, startPage=None, maxPage=None, *args, **kwargs):
+        super(urlspiderSpider, self).__init__(*args, **kwargs)
+        
+        # Set base URL with default
+        if baseUrl:
+            self.baseUrl = baseUrl
+        else:
+            self.baseUrl = "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
+        
+        # Set start page with default
+        if startPage:
+            self.startPage = int(startPage)
+        else:
+            self.startPage = 1
+        
+        # Set max page with default
+        if maxPage:
+            self.maxPage = int(maxPage)
+        else:
+            self.maxPage = 1
+        
+        self.logger.info(f"Initialized with baseUrl: {self.baseUrl}")
+        self.logger.info(f"Start page: {self.startPage}, Max page: {self.maxPage}")
 
     def start_requests(self):
         url = self.baseUrl.format(self.startPage)
