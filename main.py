@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys
 import os
 import pathlib
@@ -61,21 +62,30 @@ def get_number(prompt, min_val=1, max_val=None):
             print("❌ Please enter a valid number\n")
 
 
-def find_latest_csv():
-    """Find the most recent CSV file in outputs/urls/"""
-    PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
-    urls_dir = PROJECT_ROOT / "outputs" / "urls"
+def get_url(prompt, default=None):
+    """
+    Get a valid URL from user.
 
-    if not urls_dir.exists():
-        return None
+    Args:
+        prompt (str): Prompt to display
+        default (str): Default URL if user presses enter
 
-    csv_files = list(urls_dir.glob("listingURLS_*.csv"))
-    if not csv_files:
-        return None
+    Returns:
+        str: User's URL
+    """
+    while True:
+        if default:
+            url = input(f"{prompt} (default: {default})\nURL: ").strip()
+            if not url:
+                return default
+        else:
+            url = input(prompt).strip()
 
-    # Sort by modification time, most recent first
-    latest = max(csv_files, key=lambda p: p.stat().st_mtime)
-    return str(latest)
+        if url.startswith("http://") or url.startswith("https://"):
+            # Basic validation - must contain {page} placeholder or be valid without it
+            return url
+        else:
+            print("❌ URL must start with http:// or https://\n")
 
 
 def list_available_csvs():
@@ -94,14 +104,15 @@ def list_available_csvs():
     return [str(f) for f in csv_files]
 
 
-def run_urlspider(max_page):
+def run_urlspider(base_url, start_page, max_page):
     """Run the URL spider to collect listing URLs."""
     print(f"\n{'=' * 60}")
     print(f"🚀 Starting URL Spider")
-    print(f"📄 Max pages to scrape: {max_page}")
+    print(f"🌐 Base URL: {base_url}")
+    print(f"📄 Pages: {start_page} to {max_page}")
     print(f"{'=' * 60}\n")
 
-    from scrappers.spiders.urlspider import urlspiderSpider
+    from scrappers.spiders.urlspider import UrlSpider
 
     settings = get_project_settings()
     settings.update(
@@ -120,7 +131,7 @@ def run_urlspider(max_page):
     )
 
     process = CrawlerProcess(settings)
-    process.crawl(urlspiderSpider, maxPage=max_page)
+    process.crawl(UrlSpider, baseUrl=base_url, startPage=start_page, maxPage=max_page)
     process.start()
 
     print(f"\n{'=' * 60}")
@@ -135,11 +146,11 @@ def run_listingspider(csv_path):
     print(f"📂 CSV file: {csv_path}")
     print(f"{'=' * 60}\n")
 
-    from scrappers.spiders.listingspider import ListingspiderSpider
+    from scrappers.spiders.listingspider import ListingSpider
 
     settings = get_project_settings()
     process = CrawlerProcess(settings)
-    process.crawl(ListingspiderSpider, csv_path=csv_path)
+    process.crawl(ListingSpider, csv_path=csv_path)
     process.start()
 
     print(f"\n{'=' * 60}")
@@ -150,18 +161,57 @@ def run_listingspider(csv_path):
 def interactive_url_spider():
     """Interactive flow for URL spider"""
     print("\n📋 URL SPIDER CONFIGURATION\n")
-    print("This spider will collect property listing URLs from Jiji.com.gh")
+    print("This spider will collect property listing URLs from a website")
     print_separator()
 
+    # Ask if user wants to use default or custom URL
+    print("\nURL Configuration:")
+    print("  1. Use default (Jiji.com.gh Greater Accra rentals)")
+    print("  2. Enter custom URL")
+
+    url_choice = get_choice("\nChoice (1-2): ", ["1", "2"])
+
+    if url_choice == "1":
+        base_url = (
+            "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
+        )
+        print(f"\n✓ Using: {base_url}")
+    else:
+        print("\n💡 Your URL should contain {{}} where the page number goes")
+        print("   Example: https://example.com/listings?page={}")
+        base_url = get_url("\nEnter base URL: ")
+
+        # Validate URL has page placeholder
+        if "{}" not in base_url:
+            print("\n⚠️  Warning: URL doesn't contain {{}} for page numbers")
+            add_placeholder = get_choice(
+                "Add ?page={{}} to the end? (y/n): ", ["y", "n", "Y", "N"]
+            )
+            if add_placeholder.lower() == "y":
+                base_url += "?page={}"
+
+    print_separator()
+
+    # Get start page
+    start_page = get_number("\nStarting page number (default 1): ", min_val=1)
+
+    # Get max page
     max_page = get_number(
-        "\nHow many pages would you like to scrape? (1-100): ", min_val=1, max_val=100
+        f"\nEnding page number (must be >= {start_page}): ", min_val=start_page
     )
 
-    print(f"\n✓ Will scrape {max_page} page(s)")
+    total_pages = max_page - start_page + 1
+
+    print(f"\n📊 Summary:")
+    print(f"   • Base URL: {base_url}")
+    print(f"   • Start page: {start_page}")
+    print(f"   • End page: {max_page}")
+    print(f"   • Total pages: {total_pages}")
+
     confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
 
     if confirm.lower() == "y":
-        run_urlspider(max_page)
+        run_urlspider(base_url, start_page, max_page)
     else:
         print("\n❌ Cancelled\n")
 
@@ -178,34 +228,51 @@ def interactive_listing_spider():
     if not csv_files:
         print("\n❌ No CSV files found in outputs/urls/")
         print("Please run the URL spider first to collect URLs.\n")
-        return
 
-    print(f"\nFound {len(csv_files)} CSV file(s):\n")
-
-    # Show available files
-    for i, csv_file in enumerate(csv_files[:10], 1):  # Show max 10
-        filename = os.path.basename(csv_file)
-        print(f"  {i}. {filename}")
-
-    if len(csv_files) > 10:
-        print(f"  ... and {len(csv_files) - 10} more")
-
-    print(f"\n  0. Enter custom path")
-    print_separator()
-
-    choice = get_number(
-        f"\nSelect CSV file (0-{min(len(csv_files), 10)}): ",
-        min_val=0,
-        max_val=min(len(csv_files), 10),
-    )
-
-    if choice == 0:
-        csv_path = input("\nEnter CSV file path: ").strip()
-        if not os.path.exists(csv_path):
-            print(f"\n❌ File not found: {csv_path}\n")
+        manual = get_choice("Enter a CSV path manually? (y/n): ", ["y", "n", "Y", "N"])
+        if manual.lower() == "y":
+            csv_path = input("\nEnter CSV file path: ").strip()
+            if not os.path.exists(csv_path):
+                print(f"\n❌ File not found: {csv_path}\n")
+                return
+        else:
             return
     else:
-        csv_path = csv_files[choice - 1]
+        print(f"\nFound {len(csv_files)} CSV file(s):\n")
+
+        # Show available files
+        for i, csv_file in enumerate(csv_files[:10], 1):  # Show max 10
+            filename = os.path.basename(csv_file)
+            file_size = os.path.getsize(csv_file) / 1024  # KB
+            print(f"  {i}. {filename} ({file_size:.1f} KB)")
+
+        if len(csv_files) > 10:
+            print(f"  ... and {len(csv_files) - 10} more")
+
+        print(f"\n  0. Enter custom path")
+        print_separator()
+
+        choice = get_number(
+            f"\nSelect CSV file (0-{min(len(csv_files), 10)}): ",
+            min_val=0,
+            max_val=min(len(csv_files), 10),
+        )
+
+        if choice == 0:
+            csv_path = input("\nEnter CSV file path: ").strip()
+            if not os.path.exists(csv_path):
+                print(f"\n❌ File not found: {csv_path}\n")
+                return
+        else:
+            csv_path = csv_files[choice - 1]
+
+    # Count lines in CSV
+    try:
+        with open(csv_path, "r") as f:
+            line_count = sum(1 for _ in f) - 1  # -1 for header
+        print(f"\n📊 This CSV contains {line_count} URL(s)")
+    except:
+        pass
 
     print(f"\n✓ Selected: {os.path.basename(csv_path)}")
     confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])

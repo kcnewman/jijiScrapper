@@ -21,7 +21,7 @@ SAVE_DIR = PROJECT_ROOT / "outputs" / "data"
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-class ListingspiderSpider(scrapy.Spider):
+class ListingSpider(scrapy.Spider):
     name = "listingspider"
 
     custom_settings = {
@@ -55,7 +55,7 @@ class ListingspiderSpider(scrapy.Spider):
     def __init__(
         self, csv_path="outputs/urls/listingURLS_20251026_165941.csv", *args, **kwargs
     ):
-        super(ListingspiderSpider, self).__init__(*args, **kwargs)
+        super(ListingSpider, self).__init__(*args, **kwargs)
         if not os.path.isabs(csv_path):
             self.csv_path = os.path.join(PROJECT_ROOT, csv_path)
         else:

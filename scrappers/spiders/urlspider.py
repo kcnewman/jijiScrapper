@@ -15,7 +15,7 @@ def abortRequest(request):
     return False
 
 
-class urlspiderSpider(scrapy.Spider):
+class UrlSpider(scrapy.Spider):
     name = "urlspider"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -33,26 +33,28 @@ class urlspiderSpider(scrapy.Spider):
     }
 
     def __init__(self, baseUrl=None, startPage=None, maxPage=None, *args, **kwargs):
-        super(urlspiderSpider, self).__init__(*args, **kwargs)
-        
+        super(UrlSpider, self).__init__(*args, **kwargs)
+
         # Set base URL with default
         if baseUrl:
             self.baseUrl = baseUrl
         else:
-            self.baseUrl = "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
-        
+            self.baseUrl = (
+                "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
+            )
+
         # Set start page with default
         if startPage:
             self.startPage = int(startPage)
         else:
             self.startPage = 1
-        
+
         # Set max page with default
         if maxPage:
             self.maxPage = int(maxPage)
         else:
             self.maxPage = 1
-        
+
         self.logger.info(f"Initialized with baseUrl: {self.baseUrl}")
         self.logger.info(f"Start page: {self.startPage}, Max page: {self.maxPage}")
 
