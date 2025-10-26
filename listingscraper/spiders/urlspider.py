@@ -1,5 +1,6 @@
 import scrapy
 from scrapy_playwright.page import PageMethod
+from datetime import datetime
 
 
 def abortRequest(request):
@@ -10,18 +11,26 @@ def abortRequest(request):
 
 class urlspiderSpider(scrapy.Spider):
     name = "urlspider"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     custom_settings = {
         "PLAYWRIGHT_ABORT_REQUEST": abortRequest,
         "DOWNLOAD_TIMEOUT": 60,
         "RETRY_TIMES": 3,
+        "FEEDS": {
+            f"outputs/urls/listingUrls_{timestamp}.csv": {
+                "format": "csv",
+                "fields": ["url", "page"],
+                "overwrite": True,
+            }
+        },
     }
 
-    start_page = 1
-    max_page = 2  # Maximum page number
-    base_url = "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
+    startPage = 1
+    maxPage = 2  # Maximum page number
+    baseUrl = "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
 
     def start_requests(self):
-        url = self.base_url.format(self.start_page)
+        url = self.baseUrl.format(self.startPage)
         yield scrapy.Request(
             url=url,
             meta={
@@ -32,7 +41,7 @@ class urlspiderSpider(scrapy.Spider):
                     )
                 ],
                 "playwright_include_page": True,
-                "current_page": self.start_page,
+                "current_page": self.startPage,
             },
             errback=self.errback_close_page,
             dont_filter=True,
@@ -40,26 +49,26 @@ class urlspiderSpider(scrapy.Spider):
 
     async def parse(self, response):
         page = response.meta["playwright_page"]
-        current_page = response.meta["current_page"]
+        currPage = response.meta["current_page"]
 
         try:
             # Extract listings from current page
             links = response.css("div.b-advert-listing a::attr(href)").getall()
-            self.logger.info(f"Page {current_page}: Found {len(links)} links")
+            self.logger.info(f"Page {currPage}: Found {len(links)} links")
 
             for href in links:
                 absUrl = response.urljoin(href)
-                yield {"url": absUrl, "page": current_page}
+                yield {"url": absUrl, "page": currPage}
 
             # Move to next page if not at max_page
-            if current_page < self.max_page:
-                next_page = current_page + 1
-                next_url = self.base_url.format(next_page)
+            if currPage < self.maxPage:
+                nextPage = currPage + 1
+                nextUrl = self.baseUrl.format(nextPage)
 
                 await page.close()
 
                 yield scrapy.Request(
-                    url=next_url,
+                    url=nextUrl,
                     meta={
                         "playwright": True,
                         "playwright_page_methods": [
@@ -70,7 +79,7 @@ class urlspiderSpider(scrapy.Spider):
                             )
                         ],
                         "playwright_include_page": True,
-                        "current_page": next_page,
+                        "current_page": nextPage,
                     },
                     callback=self.parse,
                     errback=self.errback_close_page,
@@ -81,7 +90,7 @@ class urlspiderSpider(scrapy.Spider):
                 await page.close()
 
         except Exception as e:
-            self.logger.error(f"Error on page {current_page}: {str(e)}")
+            self.logger.error(f"Error on page {currPage}: {str(e)}")
             await page.close()
 
     async def errback_close_page(self, failure):
