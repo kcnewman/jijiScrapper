@@ -35,7 +35,6 @@ class UrlSpider(scrapy.Spider):
     def __init__(self, baseUrl=None, startPage=None, maxPage=None, *args, **kwargs):
         super(UrlSpider, self).__init__(*args, **kwargs)
 
-        # Set base URL with default
         if baseUrl:
             self.baseUrl = baseUrl
         else:
@@ -43,13 +42,11 @@ class UrlSpider(scrapy.Spider):
                 "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
             )
 
-        # Set start page with default
         if startPage:
             self.startPage = int(startPage)
         else:
             self.startPage = 1
 
-        # Set max page with default
         if maxPage:
             self.maxPage = int(maxPage)
         else:
@@ -81,7 +78,6 @@ class UrlSpider(scrapy.Spider):
         currPage = response.meta["current_page"]
 
         try:
-            # Extract listings from current page
             links = response.css("div.b-advert-listing a::attr(href)").getall()
             self.logger.info(f"Page {currPage}: Found {len(links)} links")
 
@@ -89,7 +85,6 @@ class UrlSpider(scrapy.Spider):
                 absUrl = response.urljoin(href)
                 yield {"url": absUrl, "page": currPage}
 
-            # Move to next page if not at max_page
             if currPage < self.maxPage:
                 nextPage = currPage + 1
                 nextUrl = self.baseUrl.format(nextPage)

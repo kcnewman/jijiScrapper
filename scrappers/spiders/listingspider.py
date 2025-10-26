@@ -41,8 +41,7 @@ class ListingSpider(scrapy.Spider):
         "CONCURRENT_REQUESTS_PER_DOMAIN": 4,
         "DOWNLOAD_TIMEOUT": 30,
         "RETRY_TIMES": 3,
-        # Suppress asyncio warnings
-        "LOG_LEVEL": "INFO",
+        "LOG_LEVEL": "INFO",  # suppress asyncio warnings
         "FEEDS": {
             os.path.join(
                 SAVE_DIR, f"listings__{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -70,7 +69,7 @@ class ListingSpider(scrapy.Spider):
         try:
             with open(self.csv_path, "r", encoding="utf-8") as f:
                 reader = csv.reader(f)
-                next(reader)  # Skip header row
+                next(reader)  # this line skips header row
                 for row in reader:
                     if row and row[0].strip():
                         urls.append(row[0].strip())
@@ -159,7 +158,6 @@ class ListingSpider(scrapy.Spider):
                                     amenities.append(amenity_text)
 
                 except Exception as e:
-                    # skip if amenities section doesn't exist
                     pass
 
             # Extract price

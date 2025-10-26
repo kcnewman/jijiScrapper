@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-Interactive interface for running web scraping spiders.
-Supports both URL collection and listing detail extraction.
-"""
 
 import sys
 import os
@@ -14,7 +10,7 @@ from scrapy.utils.project import get_project_settings
 def print_header():
     """Print welcome header"""
     print("\n" + "=" * 60)
-    print("🕷️  PROPERTY LISTING SCRAPER")
+    print("🕷️ LISTING SCRAPER")
     print("=" * 60 + "\n")
 
 
@@ -87,7 +83,6 @@ def get_url(prompt, default=None):
             url = input(prompt).strip()
 
         if url.startswith("http://") or url.startswith("https://"):
-            # Basic validation - must contain {page} placeholder or be valid without it
             return url
         else:
             print("❌ URL must start with http:// or https://\n")
@@ -169,7 +164,6 @@ def interactive_url_spider():
     print("This spider will collect property listing URLs from a website")
     print_separator()
 
-    # Ask if user wants to use default or custom URL
     print("\nURL Configuration:")
     print("  1. Use default (Jiji.com.gh Greater Accra rentals)")
     print("  2. Enter custom URL")
@@ -186,7 +180,6 @@ def interactive_url_spider():
         print("   Example: https://example.com/listings?page={}")
         base_url = get_url("\nEnter base URL: ")
 
-        # Validate URL has page placeholder
         if "{}" not in base_url:
             print("\n⚠️  Warning: URL doesn't contain {{}} for page numbers")
             add_placeholder = get_choice(
@@ -197,10 +190,8 @@ def interactive_url_spider():
 
     print_separator()
 
-    # Get start page
     start_page = get_number("\nStarting page number (default 1): ", min_val=1)
 
-    # Get max page
     max_page = get_number(
         f"\nEnding page number (must be >= {start_page}): ", min_val=start_page
     )
@@ -245,7 +236,6 @@ def interactive_listing_spider():
     else:
         print(f"\nFound {len(csv_files)} CSV file(s):\n")
 
-        # Show available files
         for i, csv_file in enumerate(csv_files[:10], 1):  # Show max 10
             filename = os.path.basename(csv_file)
             file_size = os.path.getsize(csv_file) / 1024  # KB
@@ -271,7 +261,6 @@ def interactive_listing_spider():
         else:
             csv_path = csv_files[choice - 1]
 
-    # Count lines in CSV
     try:
         with open(csv_path, "r") as f:
             line_count = sum(1 for _ in f) - 1  # -1 for header
@@ -310,7 +299,6 @@ def main():
                 print("\n👋 Goodbye!\n")
                 sys.exit(0)
 
-            # Ask if user wants to run another spider
             print_separator()
             another = get_choice("\nRun another spider? (y/n): ", ["y", "n", "Y", "N"])
             if another.lower() != "y":
