@@ -21,27 +21,27 @@ class urlspiderSpider(scrapy.Spider):
     def __init__(self, baseURL=None, totalListing=None, *args, **kwargs):
         super(urlspiderSpider, self).__init__(*args, **kwargs)
 
-        if not base_url:
+        if not baseURL:
             raise ValueError("base_url is required")
-        if not total_listings:
+        if not totalListing:
             raise ValueError("total_listings is required")
 
-        self.base_url = base_url.rstrip(
+        self.base_url = baseURL.rstrip(
             "/"
         )  # Ensure no trailing slash for consistent URL building
-        self.total_listings = int(total_listings)
-        self.listings_per_page = 20  # As per your observation
-        self.start_page = 1
-        self.max_page = ceil(self.total_listings / self.listings_per_page)
+        self.totalListing = int(totalListing)
+        self.listingPPage = 20  # As per your observation
+        self.startPage = 1
+        self.maxPage = ceil(self.totalListing / self.listingPPage)
         self.processed_urls = set()  # To ensure no duplicate URLs are yielded
 
-        self.logger.info(f"Initializing URL spider with:")
+        self.logger.info("Initializing URL spider with:")
         self.logger.info(f"Base URL: {self.base_url}")
-        self.logger.info(f"Total listings: {self.total_listings}")
-        self.logger.info(f"Calculated max pages: {self.max_page}")
+        self.logger.info(f"Total listings: {self.totalListing}")
+        self.logger.info(f"Calculated max pages: {self.maxPage}")
 
     def start_requests(self):
-        url = f"{self.base_url}?page={self.start_page}"
+        url = f"{self.base_url}?page={self.startPage}"
         self.logger.info(f"Starting URL requests from: {url}")
         yield scrapy.Request(
             url=url,
@@ -53,7 +53,7 @@ class urlspiderSpider(scrapy.Spider):
                     )
                 ],
                 "playwright_include_page": True,
-                "current_page": self.start_page,
+                "current_page": self.startPage,
             },
             errback=self.errback_close_page,
             dont_filter=True,  # Allow retries for initial request
@@ -61,7 +61,7 @@ class urlspiderSpider(scrapy.Spider):
 
     async def parse(self, response):
         page = response.meta["playwright_page"]
-        curr_page = response.meta["current_page"]
+        currPage = response.meta["current_page"]
 
         try:
             links = response.css("div.b-advert-listing a::attr(href)").getall()
@@ -74,20 +74,20 @@ class urlspiderSpider(scrapy.Spider):
                     new_links_on_page += 1
                     yield {
                         "url": abs_url,
-                        "page": curr_page,
+                        "page": currPage,
                     }
 
             self.logger.info(
-                f"Page {curr_page}/{self.max_page}: Found {len(links)} total links, {new_links_on_page} new unique links."
+                f"Page {currPage}/{self.maxPage}: Found {len(links)} total links, {new_links_on_page} new unique links."
             )
             self.logger.info(
                 f"Total unique URLs collected so far: {len(self.processed_urls)}"
             )
 
-            if curr_page < self.max_page:
-                next_page = curr_page + 1
+            if currPage < self.maxPage:
+                next_page = currPage + 1
                 next_url = f"{self.base_url}?page={next_page}"
-                await page.close()  # Close current page before requesting next
+                await page.close()
 
                 yield scrapy.Request(
                     url=next_url,
@@ -109,12 +109,12 @@ class urlspiderSpider(scrapy.Spider):
                 )
             else:
                 self.logger.info(
-                    f"Reached maximum page number ({self.max_page}). Total unique URLs: {len(self.processed_urls)}"
+                    f"Reached maximum page number ({self.maxPage}). Total unique URLs: {len(self.processed_urls)}"
                 )
                 await page.close()  # Ensure page is closed when max_page is reached
 
         except Exception as e:
-            self.logger.error(f"Error on page {curr_page} ({response.url}): {str(e)}")
+            self.logger.error(f"Error on page {currPage} ({response.url}): {str(e)}")
             if page:
                 await page.close()
 

@@ -1,7 +1,6 @@
 import os
 import pathlib
 from datetime import datetime
-from math import ceil
 import scrapy
 from scrapy_playwright.page import PageMethod
 
