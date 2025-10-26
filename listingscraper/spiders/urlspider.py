@@ -17,7 +17,7 @@ class urlspiderSpider(scrapy.Spider):
         "DOWNLOAD_TIMEOUT": 60,
         "RETRY_TIMES": 3,
         "FEEDS": {
-            f"outputs/urls/listingUrls_{timestamp}.csv": {
+            f"/outputs/urls/listingUrls_{timestamp}.csv": {
                 "format": "csv",
                 "fields": ["url", "page"],
                 "overwrite": True,
