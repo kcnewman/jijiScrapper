@@ -95,5 +95,4 @@ DOWNLOAD_HANDLERS = {
 # settings.py
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 
-PLAYWRIGHT_LAUNCH_OPTIONS = {"headless": False}
-
+PLAYWRIGHT_LAUNCH_OPTIONS = {"headless": True}

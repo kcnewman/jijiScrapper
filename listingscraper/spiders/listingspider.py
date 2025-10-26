@@ -1,226 +1,196 @@
+import os
+import pathlib
 import scrapy
 import csv
-import json
 from scrapy_playwright.page import PageMethod
-from listingscraper.items import ListingscraperItem
+from datetime import datetime
+import asyncio
+import sys
+import warnings
+import logging
+
+# Fix for asyncio evemt loop errors
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="asyncio")
+logging.getLogger("asyncio").setLevel(logging.CRITICAL)
+
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
+SAVE_DIR = PROJECT_ROOT / "outputs" / "data"
+SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class ListingspiderSpider(scrapy.Spider):
     name = "listingspider"
 
     custom_settings = {
-        "PLAYWRIGHT_ABORT_REQUEST": lambda req: req.resource_type
-        in ["image", "media", "font"],
-        "DOWNLOAD_TIMEOUT": 120,
-        "RETRY_TIMES": 5,
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+            "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+        },
+        "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
         "PLAYWRIGHT_BROWSER_TYPE": "chromium",
         "PLAYWRIGHT_LAUNCH_OPTIONS": {
             "headless": True,
         },
-        "CONCURRENT_REQUESTS": 2,
-        "DOWNLOAD_DELAY": 1,
+        "PLAYWRIGHT_ABORT_REQUEST": lambda req: req.resource_type
+        in ["image", "media", "font", "stylesheet"],
+        "DOWNLOAD_DELAY": 0.5,
+        "CONCURRENT_REQUESTS": 4,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 4,
+        "DOWNLOAD_TIMEOUT": 30,
+        "RETRY_TIMES": 3,
+        # Suppress asyncio warnings
+        "LOG_LEVEL": "INFO",
+        "FEEDS": {
+            os.path.join(
+                SAVE_DIR, f"listings__{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            ): {
+                "format": "csv",
+            },
+        },
     }
 
-    def __init__(self, urlsFile=None, *args, **kwargs):
+    def __init__(
+        self, csv_path="outputs/urls/listingURLS_20251026_165941.csv", *args, **kwargs
+    ):
         super(ListingspiderSpider, self).__init__(*args, **kwargs)
-        if not urlsFile:
-            raise ValueError(
-                "URL File is required to specify the CSV with listing URLs."
-            )
-        self.urlsFile = urlsFile
-        self.logger.info(
-            f"Listings spider initialized. Will read URLs from: {self.urlsFile}"
-        )
+        if not os.path.isabs(csv_path):
+            self.csv_path = os.path.join(PROJECT_ROOT, csv_path)
+        else:
+            self.csv_path = csv_path
+        self.urls = self.load_urls()
+        self.total_listings = len(self.urls)
+        self.scraped_count = 0
+
+    def load_urls(self):
+        """Load URLs from CSV file"""
+        urls = []
+        try:
+            with open(self.csv_path, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader)  # Skip header row
+                for row in reader:
+                    if row and row[0].strip():
+                        urls.append(row[0].strip())
+        except FileNotFoundError:
+            self.logger.error(f"CSV file not found: {self.csv_path}")
+        return urls
 
     def start_requests(self):
-        try:
-            with open(self.urlsFile, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    listingURL = row.get("url")
-                    if listingURL and listingURL.strip():
-                        yield scrapy.Request(
-                            url=listingURL.strip(),
-                            meta={
-                                "playwright": True,
-                                "playwright_page_methods": [
-                                    PageMethod(
-                                        "wait_for_selector", "h1", timeout=60000
-                                    ),
-                                    PageMethod("wait_for_load_state", "networkidle"),
-                                ],
-                                "playwright_include_page": True,
-                            },
-                            callback=self.parse,
-                            errback=self.errback_close_page,
-                            dont_filter=True,
-                        )
-                    else:
-                        self.logger.warning(f"Skipping row {row}. No link found.")
-        except FileNotFoundError:
-            self.logger.error(f"URLs file not found: {self.urlsFile}")
-        except Exception as e:
-            self.logger.error(f"Error reading URLs file {self.urlsFile}: {e}")
+        """Generate requests for all URLs"""
+        for url in self.urls:
+            yield scrapy.Request(
+                url,
+                meta={
+                    "playwright": True,
+                    "playwright_page_methods": [
+                        # avoid full loading of page
+                        PageMethod("wait_for_selector", "h1", timeout=15000),
+                    ],
+                    "playwright_include_page": True,
+                },
+                callback=self.parse,
+                errback=self.errback_close_page,
+            )
 
     async def parse(self, response):
+        """Extract listing information using Playwright page for amenities"""
         page = response.meta.get("playwright_page")
-        if not page:
-            self.logger.error(f"No playwright page found for {response.url}")
-            return
-
-        item = ListingscraperItem()
-        item["url"] = response.url
 
         try:
-            # Title
-            try:
-                title_element = await page.wait_for_selector("h1 div", timeout=5000)
-                item["title"] = (
-                    (await title_element.text_content()).strip()
-                    if title_element
-                    else None
-                )
-            except Exception as e:
-                self.logger.warning(f"Could not extract title from {response.url}: {e}")
-                item["title"] = None
+            # Extract title, location
+            title = response.css("h1 div::text, .b-advert-title-outer h1::text").get()
+            location = response.css(".b-advert-info-statistics--region::text").get()
 
-            # Full location
-            try:
-                location_element = await page.query_selector(
-                    "div.b-advert-info-statistics--region"
-                )
-                item["location"] = (
-                    (await location_element.text_content()).strip()
-                    if location_element
-                    else None
-                )
-            except Exception as e:
-                self.logger.warning(
-                    f"Could not extract location from {response.url}: {e}"
-                )
-                item["location"] = None
+            # Extract all key-value properties
+            properties = {}
+            for prop in response.css(".b-advert-attribute"):
+                key = prop.css(".b-advert-attribute__key::text").get()
+                value = prop.css(".b-advert-attribute__value::text").get()
+                if key and value:
+                    properties[key.strip().rstrip(":")] = value.strip()
 
-            item["house_type"] = None
-            item["num_bathrooms"] = None
-            item["num_bedrooms"] = None
+            # Extract house details
+            house_type = None
+            bathrooms = None
+            bedrooms = None
 
-            # House Type, No. of Bathrooms, No. of Bedrooms
-            try:
-                attribute_elements = await page.query_selector_all(
-                    "div.b-advert-icon-attribute"
-                )
-                for attr_el in attribute_elements:
-                    name_el = await attr_el.query_selector(
-                        "div.b-advert-icon-attribute__name"
-                    )
-                    value_el = await attr_el.query_selector(
-                        "div.b-advert-icon-attribute__value"
-                    )
-                    if name_el and value_el:
-                        name_text = (await name_el.text_content()).strip().lower()
-                        value_text = (await value_el.text_content()).strip()
-                        if "house type" in name_text or "type" in name_text:
-                            item["house_type"] = value_text
-                        elif "bathroom" in name_text:
-                            item["num_bathrooms"] = value_text
-                        elif "bedroom" in name_text:
-                            item["num_bedrooms"] = value_text
-            except Exception as e:
-                self.logger.warning(
-                    f"Could not extract house attributes from {response.url}: {e}"
-                )
+            icon_details_texts = response.css(
+                ".b-advert-icon-attribute span::text, .b-advert-icon-attribute__value::text"
+            ).getall()
 
-            # Listing properties
-            all_properties = {}
+            for detail in icon_details_texts:
+                detail_lower = detail.lower()
+                if "bed" in detail_lower:
+                    bedrooms = detail.strip()
+                elif "bath" in detail_lower:
+                    bathrooms = detail.strip()
+                elif not house_type:
+                    house_type = detail.strip()
 
-            async def extract_properties_from_section(section_selector):
-                """Helper function to extract properties from a section"""
-                try:
-                    section_element = await page.query_selector(section_selector)
-                    if section_element:
-                        rows = await section_element.query_selector_all(
-                            "div.b-advert-item-details__row"
-                        )
-                        for row in rows:
-                            name_el = await row.query_selector(
-                                "div.b-advert-item-details__name"
-                            )
-                            value_el = await row.query_selector(
-                                "div.b-advert-item-details__value"
-                            )
-                            if name_el and value_el:
-                                name = (await name_el.text_content()).strip()
-                                value = (await value_el.text_content()).strip()
-                                if name and value:  # Only add if both exist
-                                    all_properties[name] = value
-                except Exception as e:
-                    self.logger.debug(
-                        f"Could not extract from section {section_selector}: {e}"
-                    )
+            if not house_type:
+                house_type = properties.get("Subtype") or properties.get("Type")
+            if not bedrooms:
+                bedrooms = properties.get("Bedrooms")
+            if not bathrooms:
+                bathrooms = properties.get("Bathrooms") or properties.get("Toilets")
 
-            await extract_properties_from_section(
-                "div.b-advert-item-details-collapser__visible"
-            )
-            await extract_properties_from_section(
-                "div.b-advert-item-details-collapser__rest"
-            )
-
-            item["properties"] = (
-                json.dumps(all_properties) if all_properties else json.dumps({})
-            )
-
-            # All amenities
+            # ameneties extraction
             amenities = []
-            try:
-                amenity_elements = await page.query_selector_all(
-                    "div.b-advert-icon-attribute__name"
-                )
-                for el in amenity_elements:
-                    text = await el.text_content()
-                    if text and text.strip():
-                        amenity_text = text.strip()
-                        if amenity_text.lower() not in [
-                            "house type",
-                            "bathrooms",
-                            "bedrooms",
-                        ]:
-                            amenities.append(amenity_text)
+            if page:
+                try:
+                    # don't wait if ameneties don't exit
+                    amenities_section = await page.query_selector(
+                        ".b-advert-attributes--tags"
+                    )
 
-                amenities = list(dict.fromkeys(amenities))
-            except Exception as e:
-                self.logger.warning(
-                    f"Could not extract amenities from {response.url}: {e}"
-                )
+                    if amenities_section:
+                        amenity_elements = await page.query_selector_all(
+                            ".b-advert-attributes__tag"
+                        )
 
-            item["amenities"] = json.dumps(amenities)
+                        for element in amenity_elements:
+                            text = await element.text_content()
+                            if text:
+                                amenity_text = text.strip()
+                                if amenity_text and amenity_text not in amenities:
+                                    amenities.append(amenity_text)
 
-            # Listing price
-            try:
-                price_selectors = [
-                    "div.b-alt-advert-price-wrapper div.qa-advert-price",
-                    "div.b-alt-advert-price-wrapper > div > div",
-                    "div.qa-advert-price",
-                ]
+                except Exception as e:
+                    # skip if amenities section doesn't exist
+                    pass
 
-                for selector in price_selectors:
-                    price_element = await page.query_selector(selector)
-                    if price_element:
-                        price_text = await price_element.text_content()
-                        if price_text and price_text.strip():
-                            item["price"] = price_text.strip()
-                            break
-                else:
-                    item["price"] = None
-            except Exception as e:
-                self.logger.warning(f"Could not extract price from {response.url}: {e}")
-                item["price"] = None
+            # Extract price
+            price = response.css(
+                ".b-alt-advert-price-wrapper span.qa-advert-price-view-value::text, "
+                ".b-alt-advert-price-wrapper .qa-advert-price::text, "
+                ".b-alt-advert-price-wrapper div::text"
+            ).get()
 
-            self.logger.info(f"Successfully scraped: {response.url}")
-            yield item
+            self.scraped_count += 1
+            self.logger.info(
+                f"Scraped listing {self.scraped_count}/{self.total_listings}"
+            )
+
+            yield {
+                "url": response.url,
+                "title": title.strip() if title else None,
+                "location": location.strip() if location else None,
+                "house_type": house_type,
+                "bathrooms": bathrooms,
+                "bedrooms": bedrooms,
+                "properties": properties,
+                "amenities": amenities,
+                "price": price.strip() if price else None,
+            }
 
         except Exception as e:
             self.logger.error(f"Error parsing {response.url}: {e}", exc_info=True)
+
         finally:
+            # Always close the page to save memory
             if page:
                 try:
                     await page.close()
@@ -228,10 +198,11 @@ class ListingspiderSpider(scrapy.Spider):
                     self.logger.warning(f"Error closing page: {e}")
 
     async def errback_close_page(self, failure):
+        """Handle request failures and close page"""
         page = failure.request.meta.get("playwright_page")
         if page:
             try:
                 await page.close()
             except Exception as e:
                 self.logger.warning(f"Error closing page in errback: {e}")
-        self.logger.error(f"Request failed for {failure.request.url}: {failure.value}")
+        self.logger.error(f"Error on {failure.request.url}: {failure.value}")
