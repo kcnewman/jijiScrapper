@@ -3,6 +3,17 @@ import pathlib
 from datetime import datetime
 import scrapy
 from scrapy_playwright.page import PageMethod
+import asyncio
+import sys
+import warnings
+import logging
+
+# Fix for asyncio event loop errors
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="asyncio")
+logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAVE_DIR = PROJECT_ROOT / "outputs" / "urls"
@@ -10,19 +21,31 @@ SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def abortRequest(request):
-    if request.resource_type == "image":
-        return True
-    return False
+    """Block unnecessary resources for faster loading"""
+    return request.resource_type in ["image", "media", "font", "stylesheet"]
 
 
-class urlspiderSpider(scrapy.Spider):
+class UrlSpider(scrapy.Spider):
     name = "urlspider"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     custom_settings = {
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+            "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+        },
+        "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
+        "PLAYWRIGHT_BROWSER_TYPE": "chromium",
+        "PLAYWRIGHT_LAUNCH_OPTIONS": {
+            "headless": True,
+        },
         "PLAYWRIGHT_ABORT_REQUEST": abortRequest,
+        "DOWNLOAD_DELAY": 0.3,
+        "CONCURRENT_REQUESTS": 8,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
         "DOWNLOAD_TIMEOUT": 60,
-        "RETRY_TIMES": 3,
+        "RETRY_TIMES": 2,
+        "LOG_LEVEL": "INFO",
         "FEEDS": {
             os.path.join(SAVE_DIR, f"listingURLS_{timestamp}.csv"): {
                 "format": "csv",
@@ -33,7 +56,7 @@ class urlspiderSpider(scrapy.Spider):
     }
 
     def __init__(self, baseUrl=None, startPage=None, maxPage=None, *args, **kwargs):
-        super(urlspiderSpider, self).__init__(*args, **kwargs)
+        super(UrlSpider, self).__init__(*args, **kwargs)
 
         if baseUrl:
             self.baseUrl = baseUrl
@@ -52,8 +75,12 @@ class urlspiderSpider(scrapy.Spider):
         else:
             self.maxPage = 1
 
+        self.total_pages = self.maxPage - self.startPage + 1
+        self.scraped_count = 0
+
         self.logger.info(f"Initialized with baseUrl: {self.baseUrl}")
         self.logger.info(f"Start page: {self.startPage}, Max page: {self.maxPage}")
+        self.logger.info(f"Total pages to scrape: {self.total_pages}")
 
     def start_requests(self):
         """Generate all page requests upfront for parallel processing"""
@@ -82,46 +109,26 @@ class urlspiderSpider(scrapy.Spider):
 
         try:
             links = response.css("div.b-advert-listing a::attr(href)").getall()
-            self.logger.info(f"Page {currPage}: Found {len(links)} links")
 
             for href in links:
                 absUrl = response.urljoin(href)
                 yield {"url": absUrl, "page": currPage}
 
-            # Move to next page if not at max_page
-            if currPage < self.maxPage:
-                nextPage = currPage + 1
-                nextUrl = self.baseUrl.format(nextPage)
-
-                await page.close()
-
-                yield scrapy.Request(
-                    url=nextUrl,
-                    meta={
-                        "playwright": True,
-                        "playwright_page_methods": [
-                            PageMethod(
-                                "wait_for_selector",
-                                "div.b-advert-listing",
-                                timeout=30000,
-                            )
-                        ],
-                        "playwright_include_page": True,
-                        "current_page": nextPage,
-                    },
-                    callback=self.parse,
-                    errback=self.errback_close_page,
-                    dont_filter=True,
-                )
-            else:
-                self.logger.info("Reached maximum page number")
-                await page.close()
+            self.scraped_count += 1
+            self.logger.info(
+                f"Page {currPage}: Found {len(links)} links ({self.scraped_count}/{self.total_pages} pages completed)"
+            )
 
         except Exception as e:
             self.logger.error(f"Error on page {currPage}: {str(e)}")
-            await page.close()
+
+        finally:
+            if page:
+                await page.close()
 
     async def errback_close_page(self, failure):
+        """Handle request failures and close page"""
         page = failure.request.meta.get("playwright_page")
         if page:
             await page.close()
+        self.logger.error(f"Error on {failure.request.url}: {failure.value}")
