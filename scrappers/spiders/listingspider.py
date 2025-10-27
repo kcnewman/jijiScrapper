@@ -37,7 +37,7 @@ class ListingSpider(scrapy.Spider):
         "PLAYWRIGHT_ABORT_REQUEST": lambda req: req.resource_type
         in ["image", "media", "font", "stylesheet"],
         "DOWNLOAD_DELAY": 0.3,
-        "CONCURRENT_REQUESTS": 12,
+        "CONCURRENT_REQUESTS": 16,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
         "DOWNLOAD_TIMEOUT": 60,
         "RETRY_TIMES": 2,
