@@ -36,11 +36,11 @@ class ListingSpider(scrapy.Spider):
         },
         "PLAYWRIGHT_ABORT_REQUEST": lambda req: req.resource_type
         in ["image", "media", "font", "stylesheet"],
-        "DOWNLOAD_DELAY": 0.5,
-        "CONCURRENT_REQUESTS": 4,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 4,
-        "DOWNLOAD_TIMEOUT": 30,
-        "RETRY_TIMES": 3,
+        "DOWNLOAD_DELAY": 0.3,
+        "CONCURRENT_REQUESTS": 8,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOAD_TIMEOUT": 60,
+        "RETRY_TIMES": 2,
         "LOG_LEVEL": "INFO",  # suppress asyncio warnings
         "FEEDS": {
             os.path.join(
