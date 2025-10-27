@@ -15,7 +15,7 @@ def abortRequest(request):
     return False
 
 
-class UrlSpider(scrapy.Spider):
+class urlspiderSpider(scrapy.Spider):
     name = "urlspider"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -33,7 +33,7 @@ class UrlSpider(scrapy.Spider):
     }
 
     def __init__(self, baseUrl=None, startPage=None, maxPage=None, *args, **kwargs):
-        super(UrlSpider, self).__init__(*args, **kwargs)
+        super(urlspiderSpider, self).__init__(*args, **kwargs)
 
         if baseUrl:
             self.baseUrl = baseUrl
@@ -56,22 +56,25 @@ class UrlSpider(scrapy.Spider):
         self.logger.info(f"Start page: {self.startPage}, Max page: {self.maxPage}")
 
     def start_requests(self):
-        url = self.baseUrl.format(self.startPage)
-        yield scrapy.Request(
-            url=url,
-            meta={
-                "playwright": True,
-                "playwright_page_methods": [
-                    PageMethod(
-                        "wait_for_selector", "div.b-advert-listing", timeout=30000
-                    )
-                ],
-                "playwright_include_page": True,
-                "current_page": self.startPage,
-            },
-            errback=self.errback_close_page,
-            dont_filter=True,
-        )
+        """Generate all page requests upfront for parallel processing"""
+        for page_num in range(self.startPage, self.maxPage + 1):
+            url = self.baseUrl.format(page_num)
+            yield scrapy.Request(
+                url=url,
+                meta={
+                    "playwright": True,
+                    "playwright_page_methods": [
+                        PageMethod(
+                            "wait_for_selector", "div.b-advert-listing", timeout=30000
+                        )
+                    ],
+                    "playwright_include_page": True,
+                    "current_page": page_num,
+                },
+                callback=self.parse,
+                errback=self.errback_close_page,
+                dont_filter=True,
+            )
 
     async def parse(self, response):
         page = response.meta["playwright_page"]
@@ -85,6 +88,7 @@ class UrlSpider(scrapy.Spider):
                 absUrl = response.urljoin(href)
                 yield {"url": absUrl, "page": currPage}
 
+            # Move to next page if not at max_page
             if currPage < self.maxPage:
                 nextPage = currPage + 1
                 nextUrl = self.baseUrl.format(nextPage)
