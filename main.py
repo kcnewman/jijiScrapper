@@ -422,7 +422,7 @@ def interactive_url_spider():
         if "{}" not in base_url:
             print("\n⚠️  Warning: URL doesn't contain {{}} for page numbers")
             add_placeholder = get_choice(
-                "Add ?page={{}} to the end? (y/n): ", ["Y", "N"]
+                "Add ?page={{}} to the end? (y/n): ", ["y", "n", "Y", "N"]
             )
             if add_placeholder.lower() == "y":
                 base_url += "?page={}"
@@ -443,7 +443,7 @@ def interactive_url_spider():
     print(f"   • End page: {max_page}")
     print(f"   • Total pages: {total_pages}")
 
-    confirm = get_choice("\nProceed? (y/n): ", ["Y", "N"])
+    confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
 
     if confirm.lower() == "y":
         run_urlspider(base_url, start_page, max_page)
@@ -467,7 +467,7 @@ def interactive_listing_spider():
         print("\n❌ No CSV files found in outputs/urls/")
         print("Please run the URL spider first to collect URLs.\n")
 
-        manual = get_choice("Enter a CSV path manually? (y/n): ", ["Y", "N"])
+        manual = get_choice("Enter a CSV path manually? (y/n): ", ["y", "n", "Y", "N"])
         if manual.lower() == "y":
             csv_path = input("\nEnter CSV file path: ").strip()
             if not os.path.exists(csv_path):
@@ -518,14 +518,16 @@ def interactive_listing_spider():
     # Ask about cleaning preferences
     print_separator()
     print("\n🧹 Cleaning Options:")
-    auto_clean = get_choice("Clean data after scraping? (y/n): ", ["Y", "N"])
+    auto_clean = get_choice("Clean data after scraping? (y/n): ", ["y", "n", "Y", "N"])
 
     keep_original = False
     if auto_clean.lower() == "y":
-        keep_original = get_choice("Keep original columns? (y/n): ", ["Y", "N"])
+        keep_original = get_choice(
+            "Keep original columns? (y/n): ", ["y", "n", "Y", "N"]
+        )
         keep_original = keep_original.lower() == "y"
 
-    confirm = get_choice("\nProceed? (y/n): ", ["Y", "N"])
+    confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
 
     if confirm.lower() == "y":
         run_listingspider(
@@ -601,10 +603,12 @@ def interactive_resume_scraper():
 
         # Offer to clean and concatenate all data
         clean_all = get_choice(
-            "\n🧹 Clean and concatenate all scraped data? (y/n): ", ["Y", "N"]
+            "\n🧹 Clean and concatenate all scraped data? (y/n): ", ["y", "n", "Y", "N"]
         )
         if clean_all.lower() == "y":
-            keep_original = get_choice("Keep original columns? (y/n): ", ["Y", "N"])
+            keep_original = get_choice(
+                "Keep original columns? (y/n): ", ["y", "n", "Y", "N"]
+            )
             concatenate_and_clean_data(
                 data_dir, keep_original_columns=(keep_original.lower() == "y")
             )
@@ -631,15 +635,19 @@ def interactive_resume_scraper():
         # Ask if user wants to start scraping now
         print("\n" + "=" * 50)
         start_now = get_choice(
-            "\n🚀 Start scraping the remaining URLs now? (y/n): ", ["Y", "N"]
+            "\n🚀 Start scraping the remaining URLs now? (y/n): ", ["y", "n", "Y", "N"]
         )
 
         if start_now.lower() == "y":
             # Ask about cleaning
-            auto_clean = get_choice("Auto-clean after scraping? (y/n): ", ["Y", "N"])
+            auto_clean = get_choice(
+                "Auto-clean after scraping? (y/n): ", ["y", "n", "Y", "N"]
+            )
             keep_original = False
             if auto_clean.lower() == "y":
-                keep_original = get_choice("Keep original columns? (y/n): ", ["Y", "N"])
+                keep_original = get_choice(
+                    "Keep original columns? (y/n): ", ["y", "n", "Y", "N"]
+                )
                 keep_original = keep_original.lower() == "y"
 
             run_listingspider(
@@ -693,7 +701,7 @@ def main():
                 sys.exit(0)
 
             print_separator()
-            another = get_choice("\nRun another task? (y/n): ", ["Y", "N"])
+            another = get_choice("\nRun another task? (y/n): ", ["y", "n", "Y", "N"])
             if another.lower() != "y":
                 print("\n👋 Goodbye!\n")
                 break
