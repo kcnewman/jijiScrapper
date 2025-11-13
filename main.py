@@ -4,34 +4,24 @@ import sys
 import os
 import pathlib
 import csv
+import pandas as pd
 from datetime import datetime
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
+from scripts.clean import DataCleaner
 
 
 def print_header():
-    """Print welcome header"""
     print("\n" + "=" * 50)
     print("🕷️ LISTING SCRAPER")
     print("=" * 50 + "\n")
 
 
 def print_separator():
-    """Print separator line"""
     print("-" * 50)
 
 
 def get_choice(prompt, valid_choices):
-    """
-    Get valid user input from a list of choices.
-
-    Args:
-        prompt (str): Prompt to display
-        valid_choices (list): List of valid choices
-
-    Returns:
-        str: User's choice
-    """
     while True:
         choice = input(prompt).strip()
         if choice in valid_choices:
@@ -40,17 +30,6 @@ def get_choice(prompt, valid_choices):
 
 
 def get_number(prompt, min_val=1, max_val=None):
-    """
-    Get a valid number from user.
-
-    Args:
-        prompt (str): Prompt to display
-        min_val (int): Minimum valid value
-        max_val (int): Maximum valid value (None for no limit)
-
-    Returns:
-        int: User's number
-    """
     while True:
         try:
             value = int(input(prompt).strip())
@@ -66,16 +45,6 @@ def get_number(prompt, min_val=1, max_val=None):
 
 
 def get_url(prompt, default=None):
-    """
-    Get a valid URL from user.
-
-    Args:
-        prompt (str): Prompt to display
-        default (str): Default URL if user presses enter
-
-    Returns:
-        str: User's URL
-    """
     while True:
         if default:
             url = input(f"{prompt} (default: {default})\nURL: ").strip()
@@ -104,7 +73,6 @@ def list_csv_files(directory, pattern="*.csv"):
 
 
 def display_files(files, file_type):
-    """Display numbered list of files with size and date"""
     if not files:
         print(f"   ⚠️  No {file_type} files found")
         return False
@@ -133,7 +101,6 @@ def display_files(files, file_type):
 
 
 def select_file(files, file_type):
-    """Let user select a file from the list"""
     while True:
         try:
             choice = input(
@@ -225,6 +192,139 @@ def save_remaining_urls(remaining_urls, urls_dir):
         return None
 
 
+def concatenate_and_clean_data(data_dir, keep_original_columns=False):
+    """
+    Concatenate all scraped CSV files and clean the combined data.
+    """
+    print("\n" + "=" * 50)
+    print("🧹 CLEANING DATA")
+    print("=" * 50)
+
+    data_files = list_csv_files(data_dir, "listings__*.csv")
+
+    if not data_files:
+        print("\n❌ No data files found to clean")
+        return None
+
+    print(f"\n📊 Found {len(data_files)} scraped file(s)")
+
+    print("\n📥 Reading and concatenating files...")
+    dfs = []
+    total_rows = 0
+
+    for file in data_files:
+        try:
+            df = pd.read_csv(file)
+            rows = len(df)
+            dfs.append(df)
+            total_rows += rows
+            print(f"   ✅ {file.name}: {rows:,} rows")
+        except Exception as e:
+            print(f"   ❌ Error reading {file.name}: {e}")
+
+    if not dfs:
+        print("\n❌ No data could be read")
+        return None
+
+    print(f"\n🔗 Concatenating {len(dfs)} file(s)...")
+    combined_df = pd.concat(dfs, ignore_index=True)
+    print(f"   ✅ Total rows before removing duplicates: {len(combined_df):,}")
+
+    # Remove duplicates based on URL
+    if "url" in combined_df.columns:
+        before_dedup = len(combined_df)
+        combined_df = combined_df.drop_duplicates(subset=["url"], keep="first")
+        after_dedup = len(combined_df)
+        duplicates_removed = before_dedup - after_dedup
+
+        if duplicates_removed > 0:
+            print(f"   ✅ Removed {duplicates_removed:,} duplicate(s)")
+        print(f"   ✅ Total unique rows: {after_dedup:,}")
+
+    # Save concatenated file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    concatenated_path = data_dir / f"listings_combined_{timestamp}.csv"
+    combined_df.to_csv(concatenated_path, index=False)
+    print(f"   ✅ Saved file: {concatenated_path.name}")
+
+    # Clean the data
+    print(f"\n🧼 Cleaning data)...")
+    try:
+        cleaner = DataCleaner(keep_original_columns=keep_original_columns)
+        cleaner.df = combined_df
+
+        cleaner.extract_sub_location()
+        cleaner.fill_missing_house_type()
+        cleaner.clean_bathrooms_bedrooms()
+        cleaner.extract_properties()
+        cleaner.extract_amenities()
+        cleaned_df = cleaner.get_dataframe()
+
+        # Save cleaned file
+        cleaned_path = data_dir / f"listings_cleaned_{timestamp}.csv"
+        cleaned_df.to_csv(cleaned_path, index=False)
+
+        print(f"\n✅ Cleaning completed!")
+        print(f"   📄 Output file: {cleaned_path.name}")
+        print(f"   📊 Final rows: {len(cleaned_df):,}")
+        print(f"   📋 Final columns: {len(cleaned_df.columns)}")
+
+        return cleaned_path
+
+    except Exception as e:
+        print(f"\n❌ Error during cleaning: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return None
+
+
+def clean_single_file(file_path, keep_original_columns=False):
+    """
+    Clean a single scraped CSV file.
+    """
+    print("\n" + "=" * 50)
+    print("🧹 CLEANING DATA")
+    print("=" * 50)
+
+    print(f"\n📥 Reading file: {file_path.name}")
+
+    try:
+        # Clean the data
+        print(f"\n🧼 Cleaning data)...")
+        cleaner = DataCleaner(keep_original_columns=keep_original_columns)
+        cleaner.load_data(str(file_path))
+
+        initial_rows = len(cleaner.df)
+        print(f"   ✅ Loaded {initial_rows:,} rows")
+
+        cleaner.extract_sub_location()
+        cleaner.fill_missing_house_type()
+        cleaner.clean_bathrooms_bedrooms()
+        cleaner.extract_properties()
+        cleaner.extract_amenities()
+        cleaned_df = cleaner.get_dataframe()
+
+        # Save cleaned file (overwrite original or create new)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cleaned_path = file_path.parent / f"listings_cleaned_{timestamp}.csv"
+        cleaned_df.to_csv(cleaned_path, index=False)
+
+        print(f"\n✅ Cleaning completed!")
+        print(f"   📄 Output file: {cleaned_path.name}")
+        print(f"   📊 Final rows: {len(cleaned_df):,}")
+        print(f"   📋 Final columns: {len(cleaned_df.columns)}")
+
+        return cleaned_path
+
+    except Exception as e:
+        print(f"\n❌ Error during cleaning: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return None
+
+
 def run_urlspider(base_url, start_page, max_page):
     """Run the URL spider to collect listing URLs."""
     print(f"\n{'=' * 60}")
@@ -260,8 +360,15 @@ def run_urlspider(base_url, start_page, max_page):
     print(f"{'=' * 50}\n")
 
 
-def run_listingspider(csv_path):
-    """Run the listing spider to extract detailed information."""
+def run_listingspider(csv_path, auto_clean=True, keep_original_columns=False):
+    """
+    Run the listing spider to extract detailed information.
+
+    Args:
+        csv_path: Path to the CSV file with URLs
+        auto_clean: If True, automatically clean data after scraping
+        keep_original_columns: If False, drops original columns after transformation
+    """
     print(f"\n{'=' * 50}")
     print(f"🚀 Starting Listing Spider")
     print(f"📂 CSV file: {csv_path}")
@@ -277,6 +384,17 @@ def run_listingspider(csv_path):
     print(f"\n{'=' * 60}")
     print("✅ Listing Spider completed!")
     print(f"{'=' * 60}\n")
+
+    # Auto-clean if enabled
+    if auto_clean:
+        PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[0]
+        data_dir = PROJECT_ROOT / "outputs" / "data"
+
+        # Find the most recent scraped file
+        data_files = list_csv_files(data_dir, "listings__*.csv")
+        if data_files:
+            latest_file = data_files[0]  # Already sorted by most recent
+            clean_single_file(latest_file, keep_original_columns=keep_original_columns)
 
 
 def interactive_url_spider():
@@ -304,7 +422,7 @@ def interactive_url_spider():
         if "{}" not in base_url:
             print("\n⚠️  Warning: URL doesn't contain {{}} for page numbers")
             add_placeholder = get_choice(
-                "Add ?page={{}} to the end? (y/n): ", ["y", "n", "Y", "N"]
+                "Add ?page={{}} to the end? (y/n): ", ["Y", "N"]
             )
             if add_placeholder.lower() == "y":
                 base_url += "?page={}"
@@ -325,7 +443,7 @@ def interactive_url_spider():
     print(f"   • End page: {max_page}")
     print(f"   • Total pages: {total_pages}")
 
-    confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
+    confirm = get_choice("\nProceed? (y/n): ", ["Y", "N"])
 
     if confirm.lower() == "y":
         run_urlspider(base_url, start_page, max_page)
@@ -349,7 +467,7 @@ def interactive_listing_spider():
         print("\n❌ No CSV files found in outputs/urls/")
         print("Please run the URL spider first to collect URLs.\n")
 
-        manual = get_choice("Enter a CSV path manually? (y/n): ", ["y", "n", "Y", "N"])
+        manual = get_choice("Enter a CSV path manually? (y/n): ", ["Y", "N"])
         if manual.lower() == "y":
             csv_path = input("\nEnter CSV file path: ").strip()
             if not os.path.exists(csv_path):
@@ -396,10 +514,25 @@ def interactive_listing_spider():
         pass
 
     print(f"\n✓ Selected: {os.path.basename(csv_path)}")
-    confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
+
+    # Ask about cleaning preferences
+    print_separator()
+    print("\n🧹 Cleaning Options:")
+    auto_clean = get_choice("Clean data after scraping? (y/n): ", ["Y", "N"])
+
+    keep_original = False
+    if auto_clean.lower() == "y":
+        keep_original = get_choice("Keep original columns? (y/n): ", ["Y", "N"])
+        keep_original = keep_original.lower() == "y"
+
+    confirm = get_choice("\nProceed? (y/n): ", ["Y", "N"])
 
     if confirm.lower() == "y":
-        run_listingspider(csv_path)
+        run_listingspider(
+            csv_path,
+            auto_clean=(auto_clean.lower() == "y"),
+            keep_original_columns=keep_original,
+        )
     else:
         print("\n❌ Cancelled\n")
 
@@ -465,6 +598,17 @@ def interactive_resume_scraper():
         print("\n" + "=" * 50)
         print("🎉 ALL URLS HAVE BEEN SCRAPED!".center(80))
         print("=" * 50)
+
+        # Offer to clean and concatenate all data
+        clean_all = get_choice(
+            "\n🧹 Clean and concatenate all scraped data? (y/n): ", ["Y", "N"]
+        )
+        if clean_all.lower() == "y":
+            keep_original = get_choice("Keep original columns? (y/n): ", ["Y", "N"])
+            concatenate_and_clean_data(
+                data_dir, keep_original_columns=(keep_original.lower() == "y")
+            )
+
         return
 
     # Save remaining URLs
@@ -473,7 +617,6 @@ def interactive_resume_scraper():
 
     if output_csv:
         # Final summary
-        # print("\n" + "=" * 80)
         print("\n✅ SUCCESS!".center(80))
         print("=" * 50)
         print(f"\n\n📊 Summary:")
@@ -488,11 +631,32 @@ def interactive_resume_scraper():
         # Ask if user wants to start scraping now
         print("\n" + "=" * 50)
         start_now = get_choice(
-            "\n🚀 Start scraping the remaining URLs now? (y/n): ", ["y", "n", "Y", "N"]
+            "\n🚀 Start scraping the remaining URLs now? (y/n): ", ["Y", "N"]
         )
 
         if start_now.lower() == "y":
-            run_listingspider(str(output_csv))
+            # Ask about cleaning
+            auto_clean = get_choice("Auto-clean after scraping? (y/n): ", ["Y", "N"])
+            keep_original = False
+            if auto_clean.lower() == "y":
+                keep_original = get_choice("Keep original columns? (y/n): ", ["Y", "N"])
+                keep_original = keep_original.lower() == "y"
+
+            run_listingspider(
+                str(output_csv),
+                auto_clean=(auto_clean.lower() == "y"),
+                keep_original_columns=keep_original,
+            )
+
+            # After resuming, offer to concatenate and clean all
+            concat_all = get_choice(
+                "\n🔗 Concatenate and clean all scraped data? (y/n): ",
+                ["y", "n", "Y", "N"],
+            )
+            if concat_all.lower() == "y":
+                concatenate_and_clean_data(
+                    data_dir, keep_original_columns=keep_original
+                )
         else:
             print(f"\n📝 You can resume later with this command:")
             print(
@@ -529,7 +693,7 @@ def main():
                 sys.exit(0)
 
             print_separator()
-            another = get_choice("\nRun another task? (y/n): ", ["y", "n", "Y", "N"])
+            another = get_choice("\nRun another task? (y/n): ", ["Y", "N"])
             if another.lower() != "y":
                 print("\n👋 Goodbye!\n")
                 break
