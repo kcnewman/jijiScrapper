@@ -515,7 +515,7 @@ def interactive_listing_spider():
 
     print(f"\n✓ Selected: {os.path.basename(csv_path)}")
 
-    # Ask about cleaning preferences
+    # preferences
     print_separator()
     print("\n🧹 Cleaning Options:")
     auto_clean = get_choice("Clean data after scraping? (y/n): ", ["y", "n", "Y", "N"])
