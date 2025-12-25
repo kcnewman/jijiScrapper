@@ -329,8 +329,9 @@ def clean_single_file(file_path, keep_original_columns=False):
 def run_urlspider(base_url, start_page, total_listings):
     """Run the URL spider to collect listing URLs."""
     import math
+
     max_page = start_page + math.ceil(total_listings / 24) - 1
-    
+
     print(f"\n{'=' * 60}")
     print("🚀 Starting URL Spider")
     print(f"🌐 Base URL: {base_url}")
@@ -357,7 +358,9 @@ def run_urlspider(base_url, start_page, total_listings):
     )
 
     process = CrawlerProcess(settings)
-    process.crawl(UrlSpider, baseUrl=base_url, startPage=start_page, totalListings=total_listings)
+    process.crawl(
+        UrlSpider, baseUrl=base_url, startPage=start_page, totalListings=total_listings
+    )
     process.start()
 
     print(f"\n{'=' * 50}")
@@ -404,8 +407,8 @@ def run_listingspider(csv_path, auto_clean=True, keep_original_columns=False):
 
 def interactive_url_spider():
     """Interactive flow for URL spider"""
-    print("\n📋 URL SPIDER CONFIGURATION\n")
-    print("This spider will collect property listing URLs from a website")
+    print("\n📋 URL SPIDER CONFIGURATION")
+    # print("This spider will collect property listing URLs from a website")
     print_separator()
 
     print("\nURL Configuration:")
@@ -418,7 +421,7 @@ def interactive_url_spider():
         base_url = (
             "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
         )
-        print(f"\n✓ Using: {base_url}")
+        print("✓ Using default url!")
     else:
         print("\n💡 Your URL should contain {{}} where the page number goes")
         print("   Example: https://example.com/listings?page={}")
@@ -434,13 +437,12 @@ def interactive_url_spider():
 
     print_separator()
 
-    start_page = get_number("\nStarting page number (default 1): ", min_val=1)
+    start_page = 1
 
-    total_listings = get_number(
-        "\nTotal number of listings on the site: ", min_val=1
-    )
+    total_listings = get_number("Total number of listings on the site: ", min_val=1)
 
     import math
+
     max_page = start_page + math.ceil(total_listings / 24) - 1
     total_pages = max_page - start_page + 1
 
