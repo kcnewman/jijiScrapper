@@ -565,7 +565,7 @@ def interactive_resume_scraper():
 
     # Step 1: Select original URLs file
     print("\n📌 STEP 1: Select the original URLs file")
-    urls_files = list_csv_files(urls_dir, "listingURLS_*.csv")
+    urls_files = list_csv_files(urls_dir, "*.csv")
 
     if not display_files(urls_files, "URL"):
         print("\n❌ No URL files found. Please run the URL spider first.")

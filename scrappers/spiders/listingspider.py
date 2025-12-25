@@ -9,7 +9,7 @@ import sys
 import warnings
 import logging
 
-# Fix for asyncio evemt loop errors
+# Fix for asyncio event loop errors
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -31,17 +31,42 @@ class ListingSpider(scrapy.Spider):
         },
         "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
         "PLAYWRIGHT_BROWSER_TYPE": "chromium",
+        "PLAYWRIGHT_MAX_CONTEXTS": 8,
+        "PLAYWRIGHT_MAX_PAGES_PER_CONTEXT": 4,
         "PLAYWRIGHT_LAUNCH_OPTIONS": {
             "headless": True,
+            "args": [
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+            ],
+        },
+        "PLAYWRIGHT_CONTEXTS": {
+            "default": {
+                "ignore_https_errors": True,
+                "bypass_csp": True,
+                "java_script_enabled": True,
+                "accept_downloads": False,
+            }
         },
         "PLAYWRIGHT_ABORT_REQUEST": lambda req: req.resource_type
-        in ["image", "media", "font", "stylesheet"],
-        "DOWNLOAD_DELAY": 0.3,
-        "CONCURRENT_REQUESTS": 12,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
-        "DOWNLOAD_TIMEOUT": 60,
-        "RETRY_TIMES": 2,
-        "LOG_LEVEL": "INFO",  # suppress asyncio warnings
+        in ["image", "media", "font", "stylesheet", "other"],
+        "DOWNLOAD_DELAY": 0.1,  # Reduced from 0.3
+        "CONCURRENT_REQUESTS": 16,  # Increased from 12
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 12,  # Increased from 8
+        "DOWNLOAD_TIMEOUT": 30,  # Reduced from 60
+        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 30000,  # 30 seconds
+        # AutoThrottle for smart rate limiting
+        "AUTOTHROTTLE_ENABLED": True,
+        "AUTOTHROTTLE_START_DELAY": 0.1,
+        "AUTOTHROTTLE_MAX_DELAY": 2,
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": 10.0,
+        "RETRY_TIMES": 1,  # Reduced from 2
+        "RETRY_HTTP_CODES": [500, 502, 503, 504, 408, 429],
+        "COOKIES_ENABLED": False,
+        "TELNETCONSOLE_ENABLED": False,
+        "LOG_LEVEL": "INFO",
         "FEEDS": {
             os.path.join(
                 SAVE_DIR, f"listings__{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -51,9 +76,7 @@ class ListingSpider(scrapy.Spider):
         },
     }
 
-    def __init__(
-        self, csv_path="outputs/urls/listingURLS_20251026_165941.csv", *args, **kwargs
-    ):
+    def __init__(self, csv_path="outputs/urls/combined_urls.csv", *args, **kwargs):
         super(ListingSpider, self).__init__(*args, **kwargs)
         if not os.path.isabs(csv_path):
             self.csv_path = os.path.join(PROJECT_ROOT, csv_path)
@@ -88,9 +111,14 @@ class ListingSpider(scrapy.Spider):
                 url_data["url"],
                 meta={
                     "playwright": True,
+                    "playwright_context": "default",
+                    "playwright_page_goto_kwargs": {
+                        "wait_until": "domcontentloaded",  # Don't wait for full load
+                        "timeout": 30000,
+                    },
                     "playwright_page_methods": [
-                        # avoid full loading of page
-                        PageMethod("wait_for_selector", "h1", timeout=15000),
+                        # Wait only for essential content
+                        PageMethod("wait_for_selector", "h1", timeout=10000),
                     ],
                     "playwright_include_page": True,
                     "fetch_date": url_data.get("fetch_date"),
@@ -141,13 +169,13 @@ class ListingSpider(scrapy.Spider):
             if not bathrooms:
                 bathrooms = properties.get("Bathrooms") or properties.get("Toilets")
 
-            # ameneties extraction
+            # Amenities extraction - optimized with timeout
             amenities = []
             if page:
                 try:
-                    # don't wait if ameneties don't exit
-                    amenities_section = await page.query_selector(
-                        ".b-advert-attributes--tags"
+                    amenities_section = await asyncio.wait_for(
+                        page.query_selector(".b-advert-attributes--tags"),
+                        timeout=2.0,  # Don't wait too long
                     )
 
                     if amenities_section:
@@ -155,16 +183,23 @@ class ListingSpider(scrapy.Spider):
                             ".b-advert-attributes__tag"
                         )
 
-                        for element in amenity_elements:
-                            text = await element.text_content()
-                            if text:
+                        amenity_tasks = [
+                            element.text_content() for element in amenity_elements
+                        ]
+                        amenity_texts = await asyncio.gather(
+                            *amenity_tasks, return_exceptions=True
+                        )
+
+                        for text in amenity_texts:
+                            if isinstance(text, str) and text:
                                 amenity_text = text.strip()
                                 if amenity_text and amenity_text not in amenities:
                                     amenities.append(amenity_text)
 
+                except asyncio.TimeoutError:
+                    self.logger.debug(f"Amenities section timeout for {response.url}")
                 except Exception as e:
-                    print(e)
-                    pass
+                    self.logger.debug(f"Error extracting amenities: {e}")
 
             # Extract price
             price = response.css(
