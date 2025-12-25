@@ -22,8 +22,16 @@ class DataCleaner:
         return parts[0]
 
     def append_scraping_date(self) -> "DataCleaner":
-        """Add scraping date to df"""
-        self.df["fetch_date"] = datetime.now()
+        """Use fetch_date from data or add current date if missing"""
+        if "fetch_date" not in self.df.columns:
+            self.df["fetch_date"] = datetime.now()
+        else:
+            # Convert to datetime if it's a string
+            self.df["fetch_date"] = pd.to_datetime(
+                self.df["fetch_date"], errors="coerce"
+            )
+            # Fill any NaT values with current date
+            self.df["fetch_date"].fillna(datetime.now(), inplace=True)
 
         return self
 

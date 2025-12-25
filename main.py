@@ -330,7 +330,7 @@ def run_urlspider(base_url, start_page, total_listings):
     """Run the URL spider to collect listing URLs."""
     import math
 
-    max_page = start_page + math.ceil(total_listings / 24) - 1
+    max_page = start_page + math.ceil(total_listings / 20) - 1
 
     print(f"\n{'=' * 60}")
     print("🚀 Starting URL Spider")
@@ -363,9 +363,9 @@ def run_urlspider(base_url, start_page, total_listings):
     )
     process.start()
 
-    print(f"\n{'=' * 50}")
+    # print(f"\n{'=' * 50}")
     print("✅ URL Spider completed!")
-    print(f"{'=' * 50}\n")
+    # print(f"{'=' * 50}\n")
 
 
 def run_listingspider(csv_path, auto_clean=True, keep_original_columns=False):
@@ -389,9 +389,9 @@ def run_listingspider(csv_path, auto_clean=True, keep_original_columns=False):
     process.crawl(ListingSpider, csv_path=csv_path)
     process.start()
 
-    print(f"\n{'=' * 60}")
+    # print(f"\n{'=' * 60}")
     print("✅ Listing Spider completed!")
-    print(f"{'=' * 60}\n")
+    # print(f"{'=' * 60}\n")
 
     # Auto-clean if enabled
     if auto_clean:
@@ -443,7 +443,7 @@ def interactive_url_spider():
 
     import math
 
-    max_page = start_page + math.ceil(total_listings / 24) - 1
+    max_page = start_page + math.ceil(total_listings / 20) - 1
     total_pages = max_page - start_page + 1
 
     print("\n📊 Summary:")
@@ -451,7 +451,7 @@ def interactive_url_spider():
     print(f"   • Start page: {start_page}")
     print(f"   • Total listings: {total_listings}")
     print(f"   • Calculated end page: {max_page}")
-    print(f"   • Total pages to scrape: {total_pages} (24 listings per page)")
+    print(f"   • Total pages to scrape: {total_pages} (20 listings per page)")
 
     confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
 
@@ -464,7 +464,7 @@ def interactive_url_spider():
 def interactive_listing_spider():
     """Interactive flow for listing spider"""
     print("\n📋 LISTING SPIDER CONFIGURATION\n")
-    print("This spider will extract detailed information from listing URLs")
+    # print("This spider will extract detailed information from listing URLs")
     print_separator()
 
     PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[0]

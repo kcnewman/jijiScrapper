@@ -49,13 +49,15 @@ class UrlSpider(scrapy.Spider):
         "FEEDS": {
             os.path.join(SAVE_DIR, f"listingURLS_{timestamp}.csv"): {
                 "format": "csv",
-                "fields": ["url", "page"],
+                "fields": ["url", "page", "fetch_date"],
                 "overwrite": True,
             }
         },
     }
 
-    def __init__(self, baseUrl=None, startPage=None, totalListings=None, *args, **kwargs):
+    def __init__(
+        self, baseUrl=None, startPage=None, totalListings=None, *args, **kwargs
+    ):
         super(UrlSpider, self).__init__(*args, **kwargs)
 
         if baseUrl:
@@ -73,10 +75,11 @@ class UrlSpider(scrapy.Spider):
         # Calculate max page from total listings (24 listings per page)
         if totalListings:
             import math
+
             self.totalListings = int(totalListings)
-            self.maxPage = self.startPage + math.ceil(self.totalListings / 24) - 1
+            self.maxPage = self.startPage + math.ceil(self.totalListings / 20) - 1
         else:
-            self.totalListings = 24
+            self.totalListings = 20
             self.maxPage = self.startPage
 
         self.total_pages = self.maxPage - self.startPage + 1
@@ -84,7 +87,9 @@ class UrlSpider(scrapy.Spider):
 
         self.logger.info(f"Initialized with baseUrl: {self.baseUrl}")
         self.logger.info(f"Start page: {self.startPage}, Max page: {self.maxPage}")
-        self.logger.info(f"Total listings: {self.totalListings}, Total pages to scrape: {self.total_pages}")
+        self.logger.info(
+            f"Total listings: {self.totalListings}, Total pages to scrape: {self.total_pages}"
+        )
 
     def start_requests(self):
         """Generate all page requests upfront for parallel processing"""
@@ -116,7 +121,11 @@ class UrlSpider(scrapy.Spider):
 
             for href in links:
                 absUrl = response.urljoin(href)
-                yield {"url": absUrl, "page": currPage}
+                yield {
+                    "url": absUrl,
+                    "page": currPage,
+                    "fetch_date": datetime.now().isoformat(),
+                }
 
             self.scraped_count += 1
             self.logger.info(

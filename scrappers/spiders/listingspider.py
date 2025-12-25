@@ -64,24 +64,28 @@ class ListingSpider(scrapy.Spider):
         self.scraped_count = 0
 
     def load_urls(self):
-        """Load URLs from CSV file"""
+        """Load URLs and fetch_date from CSV file"""
         urls = []
         try:
             with open(self.csv_path, "r", encoding="utf-8") as f:
-                reader = csv.reader(f)
-                next(reader)  # this line skips header row
+                reader = csv.DictReader(f)
                 for row in reader:
-                    if row and row[0].strip():
-                        urls.append(row[0].strip())
+                    if row and row.get("url", "").strip():
+                        urls.append(
+                            {
+                                "url": row["url"].strip(),
+                                "fetch_date": row.get("fetch_date", None),
+                            }
+                        )
         except FileNotFoundError:
             self.logger.error(f"CSV file not found: {self.csv_path}")
         return urls
 
     def start_requests(self):
         """Generate requests for all URLs"""
-        for url in self.urls:
+        for url_data in self.urls:
             yield scrapy.Request(
-                url,
+                url_data["url"],
                 meta={
                     "playwright": True,
                     "playwright_page_methods": [
@@ -89,6 +93,7 @@ class ListingSpider(scrapy.Spider):
                         PageMethod("wait_for_selector", "h1", timeout=15000),
                     ],
                     "playwright_include_page": True,
+                    "fetch_date": url_data.get("fetch_date"),
                 },
                 callback=self.parse,
                 errback=self.errback_close_page,
@@ -175,6 +180,7 @@ class ListingSpider(scrapy.Spider):
 
             yield {
                 "url": response.url,
+                "fetch_date": response.meta.get("fetch_date"),
                 "title": title.strip() if title else None,
                 "location": location.strip() if location else None,
                 "house_type": house_type,
