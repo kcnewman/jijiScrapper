@@ -600,7 +600,7 @@ def interactive_resume_scraper():
 
     if not remaining_urls:
         print("\n" + "=" * 50)
-        print("🎉 ALL URLS HAVE BEEN SCRAPED!".center(80))
+        print("🎉 ALL URLS HAVE BEEN SCRAPED!")
         print("=" * 50)
 
         # Offer to clean and concatenate all data
