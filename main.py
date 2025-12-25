@@ -88,7 +88,8 @@ def display_files(files, file_type):
         try:
             with open(file, "r", encoding="utf-8") as f:
                 row_count = sum(1 for _ in f) - 1  # Subtract header
-        except:
+        except Exception as e:
+            print(e)
             row_count = "?"
 
         print(f"   [{idx}] {file.name}")
@@ -248,7 +249,7 @@ def concatenate_and_clean_data(data_dir, keep_original_columns=False):
     print(f"   ✅ Saved file: {concatenated_path.name}")
 
     # Clean the data
-    print(f"\n🧼 Cleaning data)...")
+    print("\n🧼 Cleaning data)...")
     try:
         cleaner = DataCleaner(keep_original_columns=keep_original_columns)
         cleaner.df = combined_df
@@ -264,7 +265,7 @@ def concatenate_and_clean_data(data_dir, keep_original_columns=False):
         cleaned_path = data_dir / f"listings_cleaned_{timestamp}.csv"
         cleaned_df.to_csv(cleaned_path, index=False)
 
-        print(f"\n✅ Cleaning completed!")
+        print("\n✅ Cleaning completed!")
         print(f"   📄 Output file: {cleaned_path.name}")
         print(f"   📊 Final rows: {len(cleaned_df):,}")
         print(f"   📋 Final columns: {len(cleaned_df.columns)}")
@@ -291,7 +292,7 @@ def clean_single_file(file_path, keep_original_columns=False):
 
     try:
         # Clean the data
-        print(f"\n🧼 Cleaning data)...")
+        print("\n🧼 Cleaning data)...")
         cleaner = DataCleaner(keep_original_columns=keep_original_columns)
         cleaner.load_data(str(file_path))
 
@@ -310,7 +311,7 @@ def clean_single_file(file_path, keep_original_columns=False):
         cleaned_path = file_path.parent / f"listings_cleaned_{timestamp}.csv"
         cleaned_df.to_csv(cleaned_path, index=False)
 
-        print(f"\n✅ Cleaning completed!")
+        print("\n✅ Cleaning completed!")
         print(f"   📄 Output file: {cleaned_path.name}")
         print(f"   📊 Final rows: {len(cleaned_df):,}")
         print(f"   📋 Final columns: {len(cleaned_df.columns)}")
@@ -328,7 +329,7 @@ def clean_single_file(file_path, keep_original_columns=False):
 def run_urlspider(base_url, start_page, max_page):
     """Run the URL spider to collect listing URLs."""
     print(f"\n{'=' * 60}")
-    print(f"🚀 Starting URL Spider")
+    print("🚀 Starting URL Spider")
     print(f"🌐 Base URL: {base_url}")
     print(f"📄 Pages: {start_page} to {max_page}")
     print(f"{'=' * 50}\n")
@@ -370,7 +371,7 @@ def run_listingspider(csv_path, auto_clean=True, keep_original_columns=False):
         keep_original_columns: If False, drops original columns after transformation
     """
     print(f"\n{'=' * 50}")
-    print(f"🚀 Starting Listing Spider")
+    print("🚀 Starting Listing Spider")
     print(f"📂 CSV file: {csv_path}")
     print(f"{'=' * 50}\n")
 
@@ -437,7 +438,7 @@ def interactive_url_spider():
 
     total_pages = max_page - start_page + 1
 
-    print(f"\n📊 Summary:")
+    print("\n📊 Summary:")
     print(f"   • Base URL: {base_url}")
     print(f"   • Start page: {start_page}")
     print(f"   • End page: {max_page}")
@@ -489,7 +490,7 @@ def interactive_listing_spider():
         if len(csv_files) > 10:
             print(f"  ... and {len(csv_files) - 10} more")
 
-        print(f"\n  0. Enter custom path")
+        print("\n  0. Enter custom path")
         print_separator()
 
         choice = get_number(
@@ -510,7 +511,8 @@ def interactive_listing_spider():
         with open(csv_path, "r") as f:
             line_count = sum(1 for _ in f) - 1  # -1 for header
         print(f"\n📊 This CSV contains {line_count:,} URL(s)")
-    except:
+    except Exception as e:
+        print(e)
         pass
 
     print(f"\n✓ Selected: {os.path.basename(csv_path)}")
@@ -623,7 +625,7 @@ def interactive_resume_scraper():
         # Final summary
         print("\n✅ SUCCESS!".center(80))
         print("=" * 50)
-        print(f"\n\n📊 Summary:")
+        print("\n\n📊 Summary:")
         print(f"   • Total URLs: {total_urls:,}")
         print(
             f"   • Already scraped: {len(scraped_urls):,} ({len(scraped_urls) / total_urls * 100:.1f}%)"
@@ -666,7 +668,7 @@ def interactive_resume_scraper():
                     data_dir, keep_original_columns=keep_original
                 )
         else:
-            print(f"\n📝 You can resume later with this command:")
+            print("\n📝 You can resume later with this command:")
             print(
                 f'\n   scrapy crawl listingspider -a csv_path="{output_csv.relative_to(PROJECT_ROOT)}"'
             )
