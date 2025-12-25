@@ -182,7 +182,7 @@ def save_remaining_urls(remaining_urls, urls_dir):
 
         with open(output_csv, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["url", "page"])  # Write header
+            writer.writerow(["url", "page", "fetch_date"])  # Write header
             writer.writerows(remaining_urls)
 
         print(f"   ✅ Saved {len(remaining_urls):,} remaining URLs")
@@ -231,6 +231,13 @@ def concatenate_and_clean_data(data_dir, keep_original_columns=False):
     combined_df = pd.concat(dfs, ignore_index=True)
     print(f"   ✅ Total rows before removing duplicates: {len(combined_df):,}")
 
+    if combined_df.empty:
+        print("\n⚠️  Combined dataframe is empty — nothing to clean")
+        return None
+
+    # Timestamp used for cleaned output filenames
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     # Remove duplicates based on URL
     if "url" in combined_df.columns:
         before_dedup = len(combined_df)
@@ -242,11 +249,89 @@ def concatenate_and_clean_data(data_dir, keep_original_columns=False):
             print(f"   ✅ Removed {duplicates_removed:,} duplicate(s)")
         print(f"   ✅ Total unique rows: {after_dedup:,}")
 
-    # Save concatenated file
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    concatenated_path = data_dir / f"listings_combined_{timestamp}.csv"
-    combined_df.to_csv(concatenated_path, index=False)
-    print(f"   ✅ Saved file: {concatenated_path.name}")
+    # Merge fetch_date from combined URLs file to fill missing fetch_date values
+    try:
+        urls_file = (
+            pathlib.Path(__file__).resolve().parents[0]
+            / "outputs"
+            / "urls"
+            / "combined_urls.csv"
+        )
+        if urls_file.exists():
+            urls_df = pd.read_csv(urls_file, usecols=["url", "fetch_date"])
+            urls_df["fetch_date"] = pd.to_datetime(
+                urls_df["fetch_date"], errors="coerce"
+            )
+            combined_df = combined_df.merge(
+                urls_df, on="url", how="left", suffixes=("", "_url")
+            )
+            if "fetch_date_url" in combined_df.columns:
+                combined_df["fetch_date"] = pd.to_datetime(
+                    combined_df.get("fetch_date"), errors="coerce"
+                )
+                combined_df["fetch_date"] = combined_df["fetch_date"].fillna(
+                    combined_df["fetch_date_url"]
+                )
+                combined_df = combined_df.drop(columns=["fetch_date_url"])
+    except Exception as e:
+        print(f"   ⚠️ Could not merge fetch_date from URLs: {e}")
+
+    # Merge into a single combined file `listings_combined.csv`
+    combined_file = data_dir / "listings_combined.csv"
+
+    # If there is no `listings_combined.csv` but there are timestamped combined files,
+    # promote the most recent timestamped file to `listings_combined.csv` so we don't lose old data.
+    try:
+        ts_candidates = sorted(
+            list(data_dir.glob("listings_combined_*.csv")),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+        if not combined_file.exists() and ts_candidates:
+            latest_ts = ts_candidates[0]
+            try:
+                existing_from_ts = pd.read_csv(latest_ts)
+                existing_from_ts.to_csv(combined_file, index=False)
+                print(f"   ✅ Promoted {latest_ts.name} to {combined_file.name}")
+            except Exception as e:
+                print(f"   ⚠️ Could not promote {latest_ts.name}: {e}")
+    except Exception:
+        # If filesystem/stat fails, continue gracefully
+        pass
+
+    if combined_file.exists():
+        try:
+            existing = pd.read_csv(combined_file)
+            # Ensure same columns
+            if "url" in existing.columns:
+                # Find new rows (by url) that are not in existing file
+                existing_urls = set(existing["url"].astype(str).str.strip())
+                new_rows = combined_df[
+                    ~combined_df["url"].astype(str).str.strip().isin(existing_urls)
+                ]
+
+                if not new_rows.empty:
+                    updated = pd.concat([existing, new_rows], ignore_index=True)
+                    updated.to_csv(combined_file, index=False)
+                    print(
+                        f"   ✅ Merged {len(new_rows):,} new row(s) into: {combined_file.name}"
+                    )
+                else:
+                    print(f"   ✅ No new rows to add to: {combined_file.name}")
+                # Use the updated dataframe for cleaning
+                combined_df = pd.read_csv(combined_file)
+            else:
+                # If existing file lacks expected columns, replace it
+                combined_df.to_csv(combined_file, index=False)
+                print(f"   ✅ Overwrote malformed combined file: {combined_file.name}")
+        except Exception as e:
+            print(
+                f"   ⚠️  Error reading existing combined file: {e}\n   Overwriting with new combined dataframe."
+            )
+            combined_df.to_csv(combined_file, index=False)
+    else:
+        combined_df.to_csv(combined_file, index=False)
+        print(f"   ✅ Created combined file: {combined_file.name}")
 
     # Clean the data
     print("\n🧼 Cleaning data)...")
@@ -261,7 +346,7 @@ def concatenate_and_clean_data(data_dir, keep_original_columns=False):
         cleaner.extract_amenities()
         cleaned_df = cleaner.get_dataframe()
 
-        # Save cleaned file
+        # Save cleaned file (timestamped)
         cleaned_path = data_dir / f"listings_cleaned_{timestamp}.csv"
         cleaned_df.to_csv(cleaned_path, index=False)
 
@@ -291,10 +376,36 @@ def clean_single_file(file_path, keep_original_columns=False):
     print(f"\n📥 Reading file: {file_path.name}")
 
     try:
+        # Skip if file is empty or contains only header
+        p = pathlib.Path(file_path)
+        try:
+            size = p.stat().st_size
+        except Exception:
+            size = None
+
+        if size == 0:
+            print(f"\n⚠️  File is empty: {file_path.name} — skipping cleaning")
+            return None
+
+        # Quick line count check (if only header present)
+        try:
+            with open(p, "r", encoding="utf-8") as tf:
+                lines = sum(1 for _ in tf)
+        except Exception:
+            lines = None
+
+        if lines is not None and lines <= 1:
+            print(f"\n⚠️  File has no data rows: {file_path.name} — skipping cleaning")
+            return None
+
         # Clean the data
         print("\n🧼 Cleaning data)...")
         cleaner = DataCleaner(keep_original_columns=keep_original_columns)
-        cleaner.load_data(str(file_path))
+        try:
+            cleaner.load_data(str(file_path))
+        except pd.errors.EmptyDataError:
+            print(f"\n⚠️  No data found in {file_path.name} (EmptyDataError). Skipping.")
+            return None
 
         initial_rows = len(cleaner.df)
         print(f"   ✅ Loaded {initial_rows:,} rows")
@@ -365,9 +476,10 @@ def run_urlspider(base_url, start_page, total_listings):
 
     # print(f"\n{'=' * 50}")
     print("✅ URL Spider completed!")
-    
+
     # Combine all URL files into one
     from scripts.clean import combine_urls
+
     combine_urls()
 
 
@@ -577,7 +689,23 @@ def interactive_resume_scraper():
 
     # Step 2: Select scraped data file
     print("\n📌 STEP 2: Select the scraped data file")
-    data_files = list_csv_files(data_dir, "listings__*.csv")
+    # Look for both raw scraped files and combined files (e.g. listings_combined_...)
+    data_files = []
+    for pattern in (
+        "listings__*.csv",
+        "listings_combined_*.csv",
+        "listings_combined.csv",
+    ):
+        data_files.extend(list_csv_files(data_dir, pattern))
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_files = []
+    for f in data_files:
+        if f not in seen:
+            seen.add(f)
+            unique_files.append(f)
+    data_files = unique_files
 
     if not display_files(data_files, "scraped data"):
         print("\n⚠️  No scraped data files found.")
