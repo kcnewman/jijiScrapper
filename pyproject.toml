@@ -1,0 +1,11 @@
+[project]
+name = "jijiscrapper"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "playwright>=1.57.0",
+    "scrapy>=2.13.4",
+    "scrapy-playwright>=0.0.44",
+]
