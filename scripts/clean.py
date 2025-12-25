@@ -1,5 +1,6 @@
 import pandas as pd
 import ast
+import pathlib
 from datetime import datetime
 
 
@@ -110,14 +111,54 @@ class DataCleaner:
 
 
 def clean_data(data_path: str, keep_original_columns: bool = True) -> pd.DataFrame:
-    """Cleaninf function to clean data in one line.
-
-    Args:
-        data_path: Path to the CSV file
-        keep_original_columns: If False, drops original columns after transformation
-
-    Returns:
-        pd.DataFrame: Cleaned DataFrame
-    """
+    """Cleaninf function to clean data in one line."""
     cleaner = DataCleaner(keep_original_columns=keep_original_columns)
     return cleaner.load_data(data_path).clean_all()
+
+
+def combine_urls(urls_directory: str | None = None) -> pd.DataFrame | None:
+    """Combine all URL CSV files in the directory into a single combined_urls.csv file."""
+    if urls_directory is None:
+        urls_dir = pathlib.Path(__file__).resolve().parents[1] / "outputs" / "urls"
+    else:
+        urls_dir = pathlib.Path(urls_directory)
+
+    if not urls_dir.exists():
+        print(f"❌ URLs directory not found: {urls_dir}")
+        return None
+
+    csv_files = [f for f in urls_dir.glob("*.csv") if f.name != "combined_urls.csv"]
+
+    if not csv_files:
+        print(f"⚠️  No URL CSV files found in {urls_dir}")
+        return None
+
+    dfs = []
+    for csv_file in csv_files:
+        try:
+            df = pd.read_csv(csv_file)
+            dfs.append(df)
+        except Exception as e:
+            print(f"⚠️  Error reading {csv_file.name}: {e}")
+
+    if not dfs:
+        print("❌ No valid CSV files could be loaded")
+        return None
+
+    combined_df = pd.concat(dfs, ignore_index=True)
+
+    # Remove duplicates, keeping the oldest fetch_date for each URL
+    combined_df["fetch_date"] = pd.to_datetime(
+        combined_df["fetch_date"], errors="coerce"
+    )
+    combined_df = combined_df.sort_values("fetch_date", ascending=True)
+    combined_df = combined_df.drop_duplicates(subset=["url"], keep="first")
+    combined_df = combined_df.sort_values("fetch_date", ascending=False)
+
+    output_file = urls_dir / "combined_urls.csv"
+    combined_df.to_csv(output_file, index=False)
+
+    print(f"\n✅ Combined {len(csv_files)} URL files into: {output_file.name}")
+    print(f"   📊 Total unique URLs: {len(combined_df):,}")
+
+    return combined_df

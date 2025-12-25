@@ -365,7 +365,10 @@ def run_urlspider(base_url, start_page, total_listings):
 
     # print(f"\n{'=' * 50}")
     print("✅ URL Spider completed!")
-    # print(f"{'=' * 50}\n")
+    
+    # Combine all URL files into one
+    from scripts.clean import combine_urls
+    combine_urls()
 
 
 def run_listingspider(csv_path, auto_clean=True, keep_original_columns=False):
