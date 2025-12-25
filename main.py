@@ -326,11 +326,15 @@ def clean_single_file(file_path, keep_original_columns=False):
         return None
 
 
-def run_urlspider(base_url, start_page, max_page):
+def run_urlspider(base_url, start_page, total_listings):
     """Run the URL spider to collect listing URLs."""
+    import math
+    max_page = start_page + math.ceil(total_listings / 24) - 1
+    
     print(f"\n{'=' * 60}")
     print("🚀 Starting URL Spider")
     print(f"🌐 Base URL: {base_url}")
+    print(f"📊 Total listings: {total_listings}")
     print(f"📄 Pages: {start_page} to {max_page}")
     print(f"{'=' * 50}\n")
 
@@ -353,7 +357,7 @@ def run_urlspider(base_url, start_page, max_page):
     )
 
     process = CrawlerProcess(settings)
-    process.crawl(UrlSpider, baseUrl=base_url, startPage=start_page, maxPage=max_page)
+    process.crawl(UrlSpider, baseUrl=base_url, startPage=start_page, totalListings=total_listings)
     process.start()
 
     print(f"\n{'=' * 50}")
@@ -432,22 +436,25 @@ def interactive_url_spider():
 
     start_page = get_number("\nStarting page number (default 1): ", min_val=1)
 
-    max_page = get_number(
-        f"\nEnding page number (must be >= {start_page}): ", min_val=start_page
+    total_listings = get_number(
+        "\nTotal number of listings on the site: ", min_val=1
     )
 
+    import math
+    max_page = start_page + math.ceil(total_listings / 24) - 1
     total_pages = max_page - start_page + 1
 
     print("\n📊 Summary:")
     print(f"   • Base URL: {base_url}")
     print(f"   • Start page: {start_page}")
-    print(f"   • End page: {max_page}")
-    print(f"   • Total pages: {total_pages}")
+    print(f"   • Total listings: {total_listings}")
+    print(f"   • Calculated end page: {max_page}")
+    print(f"   • Total pages to scrape: {total_pages} (24 listings per page)")
 
     confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
 
     if confirm.lower() == "y":
-        run_urlspider(base_url, start_page, max_page)
+        run_urlspider(base_url, start_page, total_listings)
     else:
         print("\n❌ Cancelled\n")
 

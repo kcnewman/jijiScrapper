@@ -3,7 +3,7 @@
 A lightweight, **Scrapy + Playwright** based web-scraper for extracting listings from the popular **Jiji.com.gh** site.
 The project provides two spiders:
 
-1.  **UrlSpider** – crawls paginated search results and collects the URLs of individual listings.
+1.  **UrlSpider** – crawls search results and collects the URLs of individual listings.
 2.  **ListingSpider** – visits each URL and extracts detailed listing information (title, price, location, specs, amenities, etc.).
 
 ---

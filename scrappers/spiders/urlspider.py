@@ -55,7 +55,7 @@ class UrlSpider(scrapy.Spider):
         },
     }
 
-    def __init__(self, baseUrl=None, startPage=None, maxPage=None, *args, **kwargs):
+    def __init__(self, baseUrl=None, startPage=None, totalListings=None, *args, **kwargs):
         super(UrlSpider, self).__init__(*args, **kwargs)
 
         if baseUrl:
@@ -70,17 +70,21 @@ class UrlSpider(scrapy.Spider):
         else:
             self.startPage = 1
 
-        if maxPage:
-            self.maxPage = int(maxPage)
+        # Calculate max page from total listings (24 listings per page)
+        if totalListings:
+            import math
+            self.totalListings = int(totalListings)
+            self.maxPage = self.startPage + math.ceil(self.totalListings / 24) - 1
         else:
-            self.maxPage = 1
+            self.totalListings = 24
+            self.maxPage = self.startPage
 
         self.total_pages = self.maxPage - self.startPage + 1
         self.scraped_count = 0
 
         self.logger.info(f"Initialized with baseUrl: {self.baseUrl}")
         self.logger.info(f"Start page: {self.startPage}, Max page: {self.maxPage}")
-        self.logger.info(f"Total pages to scrape: {self.total_pages}")
+        self.logger.info(f"Total listings: {self.totalListings}, Total pages to scrape: {self.total_pages}")
 
     def start_requests(self):
         """Generate all page requests upfront for parallel processing"""

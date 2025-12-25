@@ -158,6 +158,7 @@ class ListingSpider(scrapy.Spider):
                                     amenities.append(amenity_text)
 
                 except Exception as e:
+                    print(e)
                     pass
 
             # Extract price
