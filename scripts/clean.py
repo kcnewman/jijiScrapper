@@ -1,5 +1,6 @@
 import pandas as pd
 import ast
+from datetime import datetime
 
 
 class DataCleaner:
@@ -19,6 +20,12 @@ class DataCleaner:
         if len(parts) >= 3:
             return parts[1].strip()
         return parts[0]
+
+    def append_scraping_date(self) -> "DataCleaner":
+        """Add scraping date to df"""
+        self.df["fetch_date"] = datetime.now()
+
+        return self
 
     def extract_sub_location(self) -> "DataCleaner":
         """Extract sub-location from location column."""
@@ -80,6 +87,7 @@ class DataCleaner:
 
     def clean_all(self) -> pd.DataFrame:
         """Execute full cleaning pipeline."""
+        self.append_scraping_date()
         self.extract_sub_location()
         self.fill_missing_house_type()
         self.clean_bathrooms_bedrooms()
