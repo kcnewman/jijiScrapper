@@ -36,15 +36,41 @@ class UrlSpider(scrapy.Spider):
         },
         "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
         "PLAYWRIGHT_BROWSER_TYPE": "chromium",
+        "PLAYWRIGHT_MAX_CONTEXTS": 8,
+        "PLAYWRIGHT_MAX_PAGES_PER_CONTEXT": 4,
         "PLAYWRIGHT_LAUNCH_OPTIONS": {
             "headless": True,
+            "args": [
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+            ],
         },
-        "PLAYWRIGHT_ABORT_REQUEST": abortRequest,
-        "DOWNLOAD_DELAY": 0.3,
-        "CONCURRENT_REQUESTS": 8,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
-        "DOWNLOAD_TIMEOUT": 60,
-        "RETRY_TIMES": 2,
+        "PLAYWRIGHT_CONTEXTS": {
+            "default": {
+                "ignore_https_errors": True,
+                "bypass_csp": True,
+                "java_script_enabled": True,
+                "accept_downloads": False,
+            }
+        },
+        "PLAYWRIGHT_ABORT_REQUEST": lambda req: req.resource_type
+        in ["image", "media", "font", "stylesheet", "other"],
+        "DOWNLOAD_DELAY": 0.1,  # Reduced from 0.3
+        "CONCURRENT_REQUESTS": 16,  # Increased from 12
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 12,  # Increased from 8
+        "DOWNLOAD_TIMEOUT": 30,  # Reduced from 60
+        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 30000,  # 30 seconds
+        # AutoThrottle for smart rate limiting
+        "AUTOTHROTTLE_ENABLED": True,
+        "AUTOTHROTTLE_START_DELAY": 0.1,
+        "AUTOTHROTTLE_MAX_DELAY": 2,
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": 10.0,
+        "RETRY_TIMES": 1,  # Reduced from 2
+        "RETRY_HTTP_CODES": [500, 502, 503, 504, 408, 429],
+        "COOKIES_ENABLED": False,
+        "TELNETCONSOLE_ENABLED": False,
         "LOG_LEVEL": "INFO",
         "FEEDS": {
             os.path.join(SAVE_DIR, f"listingURLS_{timestamp}.csv"): {
