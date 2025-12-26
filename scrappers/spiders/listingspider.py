@@ -31,8 +31,8 @@ class ListingSpider(scrapy.Spider):
         },
         "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
         "PLAYWRIGHT_BROWSER_TYPE": "chromium",
-        "PLAYWRIGHT_MAX_CONTEXTS": 8,
-        "PLAYWRIGHT_MAX_PAGES_PER_CONTEXT": 4,
+        "PLAYWRIGHT_MAX_CONTEXTS": 10,  # Increased from 8
+        "PLAYWRIGHT_MAX_PAGES_PER_CONTEXT": 5,  # Increased from 4
         "PLAYWRIGHT_LAUNCH_OPTIONS": {
             "headless": True,
             "args": [
@@ -52,17 +52,17 @@ class ListingSpider(scrapy.Spider):
         },
         "PLAYWRIGHT_ABORT_REQUEST": lambda req: req.resource_type
         in ["image", "media", "font", "stylesheet", "other"],
-        "DOWNLOAD_DELAY": 0.1,  # Reduced from 0.3
-        "CONCURRENT_REQUESTS": 16,  # Increased from 12
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 12,  # Increased from 8
-        "DOWNLOAD_TIMEOUT": 30,  # Reduced from 60
-        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 30000,  # 30 seconds
+        "DOWNLOAD_DELAY": 0.05,  # Reduced from 0.1
+        "CONCURRENT_REQUESTS": 20,  # Increased from 16
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 15,  # Increased from 12
+        "DOWNLOAD_TIMEOUT": 25,  # Reduced from 30
+        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 25000,  # Reduced from 30000
         # AutoThrottle for smart rate limiting
         "AUTOTHROTTLE_ENABLED": True,
         "AUTOTHROTTLE_START_DELAY": 0.1,
         "AUTOTHROTTLE_MAX_DELAY": 2,
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 10.0,
-        "RETRY_TIMES": 1,  # Reduced from 2
+        "RETRY_TIMES": 1,
         "RETRY_HTTP_CODES": [500, 502, 503, 504, 408, 429],
         "COOKIES_ENABLED": False,
         "TELNETCONSOLE_ENABLED": False,
@@ -85,6 +85,7 @@ class ListingSpider(scrapy.Spider):
         self.urls = self.load_urls()
         self.total_listings = len(self.urls)
         self.scraped_count = 0
+        self.start_time = datetime.now()  # Added for speed tracking
 
     def load_urls(self):
         """Load URLs and fetch_date from CSV file"""
@@ -113,12 +114,14 @@ class ListingSpider(scrapy.Spider):
                     "playwright": True,
                     "playwright_context": "default",
                     "playwright_page_goto_kwargs": {
-                        "wait_until": "domcontentloaded",  # Don't wait for full load
-                        "timeout": 30000,
+                        "wait_until": "domcontentloaded",
+                        "timeout": 20000,  # Reduced from 30000
                     },
                     "playwright_page_methods": [
-                        # Wait only for essential content
-                        PageMethod("wait_for_selector", "h1", timeout=10000),
+                        # Reduced timeout
+                        PageMethod(
+                            "wait_for_selector", "h1", timeout=8000
+                        ),  # Reduced from 10000
                     ],
                     "playwright_include_page": True,
                     "fetch_date": url_data.get("fetch_date"),
@@ -169,13 +172,13 @@ class ListingSpider(scrapy.Spider):
             if not bathrooms:
                 bathrooms = properties.get("Bathrooms") or properties.get("Toilets")
 
-            # Amenities extraction - optimized with timeout
+            # Amenities extraction - optimized with shorter timeout
             amenities = []
             if page:
                 try:
                     amenities_section = await asyncio.wait_for(
                         page.query_selector(".b-advert-attributes--tags"),
-                        timeout=2.0,  # Don't wait too long
+                        timeout=1.5,  # Reduced from 2.0
                     )
 
                     if amenities_section:
@@ -212,9 +215,14 @@ class ListingSpider(scrapy.Spider):
             description = response.css(".qa-description-text::text").get()
 
             self.scraped_count += 1
-            self.logger.info(
-                f"Scraped listing {self.scraped_count}/{self.total_listings}"
-            )
+
+            # Log every 10 items with speed tracking
+            if self.scraped_count % 10 == 0:
+                elapsed = (datetime.now() - self.start_time).total_seconds()
+                lpm = (self.scraped_count / elapsed) * 60 if elapsed > 0 else 0
+                self.logger.info(
+                    f"Scraped {self.scraped_count}/{self.total_listings} ({lpm:.0f} listings/min)"
+                )
 
             yield {
                 "url": response.url,
@@ -250,3 +258,15 @@ class ListingSpider(scrapy.Spider):
             except Exception as e:
                 self.logger.warning(f"Error closing page in errback: {e}")
         self.logger.error(f"Error on {failure.request.url}: {failure.value}")
+
+    def closed(self, reason):
+        """Log final stats"""
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        avg_lpm = (self.scraped_count / elapsed) * 60 if elapsed > 0 else 0
+
+        self.logger.info(f"\n{'=' * 60}")
+        self.logger.info(f"Spider closed: {reason}")
+        self.logger.info(f"Total scraped: {self.scraped_count}/{self.total_listings}")
+        self.logger.info(f"Time taken: {elapsed / 60:.1f} minutes")
+        self.logger.info(f"Average speed: {avg_lpm:.0f} listings/min")
+        self.logger.info(f"{'=' * 60}\n")
