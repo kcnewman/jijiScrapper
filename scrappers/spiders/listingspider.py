@@ -208,6 +208,9 @@ class ListingSpider(scrapy.Spider):
                 ".b-alt-advert-price-wrapper div::text"
             ).get()
 
+            # Extract description
+            description = response.css(".qa-description-text::text").get()
+
             self.scraped_count += 1
             self.logger.info(
                 f"Scraped listing {self.scraped_count}/{self.total_listings}"
@@ -215,6 +218,7 @@ class ListingSpider(scrapy.Spider):
 
             yield {
                 "url": response.url,
+                "description": description.strip() if description else None,
                 "fetch_date": response.meta.get("fetch_date"),
                 "title": title.strip() if title else None,
                 "location": location.strip() if location else None,
