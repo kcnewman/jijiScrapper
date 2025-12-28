@@ -8,6 +8,8 @@ import asyncio
 import sys
 import warnings
 import logging
+import time
+from scrapy import signals
 
 # Fix for asyncio event loop errors
 if sys.platform == "win32":
@@ -15,6 +17,9 @@ if sys.platform == "win32":
 
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="asyncio")
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
+# Silencing Scrapy noise to keep the UI clean
+logging.getLogger("scrapy").setLevel(logging.ERROR)
+logging.getLogger("playwright").setLevel(logging.ERROR)
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAVE_DIR = PROJECT_ROOT / "outputs" / "data"
@@ -24,6 +29,7 @@ SAVE_DIR.mkdir(parents=True, exist_ok=True)
 class ListingSpider(scrapy.Spider):
     name = "listingspider"
 
+    # PRESERVED YOUR EXACT SETTINGS
     custom_settings = {
         "DOWNLOAD_HANDLERS": {
             "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
@@ -31,8 +37,8 @@ class ListingSpider(scrapy.Spider):
         },
         "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
         "PLAYWRIGHT_BROWSER_TYPE": "chromium",
-        "PLAYWRIGHT_MAX_CONTEXTS": 10,  # Increased from 8
-        "PLAYWRIGHT_MAX_PAGES_PER_CONTEXT": 5,  # Increased from 4
+        "PLAYWRIGHT_MAX_CONTEXTS": 10,
+        "PLAYWRIGHT_MAX_PAGES_PER_CONTEXT": 5,
         "PLAYWRIGHT_LAUNCH_OPTIONS": {
             "headless": True,
             "args": [
@@ -52,12 +58,11 @@ class ListingSpider(scrapy.Spider):
         },
         "PLAYWRIGHT_ABORT_REQUEST": lambda req: req.resource_type
         in ["image", "media", "font", "stylesheet", "other"],
-        "DOWNLOAD_DELAY": 0.05,  # Reduced from 0.1
-        "CONCURRENT_REQUESTS": 20,  # Increased from 16
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 15,  # Increased from 12
-        "DOWNLOAD_TIMEOUT": 25,  # Reduced from 30
-        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 25000,  # Reduced from 30000
-        # AutoThrottle for smart rate limiting
+        "DOWNLOAD_DELAY": 0.05,
+        "CONCURRENT_REQUESTS": 20,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 15,
+        "DOWNLOAD_TIMEOUT": 25,
+        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 25000,
         "AUTOTHROTTLE_ENABLED": True,
         "AUTOTHROTTLE_START_DELAY": 0.1,
         "AUTOTHROTTLE_MAX_DELAY": 2,
@@ -66,7 +71,8 @@ class ListingSpider(scrapy.Spider):
         "RETRY_HTTP_CODES": [500, 502, 503, 504, 408, 429],
         "COOKIES_ENABLED": False,
         "TELNETCONSOLE_ENABLED": False,
-        "LOG_LEVEL": "INFO",
+        "LOG_ENABLED": False,
+        "LOG_LEVEL": "ERROR",
         "FEEDS": {
             os.path.join(
                 SAVE_DIR, f"listings__{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -82,31 +88,60 @@ class ListingSpider(scrapy.Spider):
             self.csv_path = os.path.join(PROJECT_ROOT, csv_path)
         else:
             self.csv_path = csv_path
+
         self.urls = self.load_urls()
         self.total_listings = len(self.urls)
+
+        # UI Tracking Stats
         self.scraped_count = 0
-        self.start_time = datetime.now()  # Added for speed tracking
+        self.failures = 0
+        self.start_time_ts = time.time()
+
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        spider = super(ListingSpider, cls).from_crawler(crawler, *args, **kwargs)
+        crawler.signals.connect(spider.spider_opened, signal=signals.spider_opened)
+        crawler.signals.connect(spider.spider_closed, signal=signals.spider_closed)
+        return spider
+
+    def spider_opened(self, spider):
+        sys.stdout.write("\n🚀 Starting data scrape...\n")
+        sys.stdout.flush()
+
+    def spider_closed(self, spider, reason):
+        self.update_progress(force=True)
+        duration = time.time() - self.start_time_ts
+        print(f"\n\n{'=' * 40}")
+        print("🏁 DONE")
+        print(f"✅ Successful: {self.scraped_count}/{self.total_listings}")
+        print(f"❌ Failures:   {self.failures}")
+        print(f"⏱️  Duration:   {duration / 60:.1f} minutes")
+        print(f"{'=' * 40}\n")
 
     def load_urls(self):
-        """Load URLs and fetch_date from CSV file"""
         urls = []
+        today_str = datetime.now().strftime("%Y-%m-%d")
         try:
             with open(self.csv_path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    if row and row.get("url", "").strip():
+                    url = row.get("url", "").strip()
+                    if url:
+                        f_date = row.get("fetch_date")
+                        if not f_date or str(f_date).strip().lower() == "nan":
+                            f_date = today_str
+
                         urls.append(
                             {
                                 "url": row["url"].strip(),
-                                "fetch_date": row.get("fetch_date", None),
+                                "fetch_date": f_date,
                             }
                         )
         except FileNotFoundError:
-            self.logger.error(f"CSV file not found: {self.csv_path}")
+            pass  # main.py handles error logging for missing files
         return urls
 
     def start_requests(self):
-        """Generate requests for all URLs"""
         for url_data in self.urls:
             yield scrapy.Request(
                 url_data["url"],
@@ -115,13 +150,10 @@ class ListingSpider(scrapy.Spider):
                     "playwright_context": "default",
                     "playwright_page_goto_kwargs": {
                         "wait_until": "domcontentloaded",
-                        "timeout": 20000,  # Reduced from 30000
+                        "timeout": 20000,
                     },
                     "playwright_page_methods": [
-                        # Reduced timeout
-                        PageMethod(
-                            "wait_for_selector", "h1", timeout=8000
-                        ),  # Reduced from 10000
+                        PageMethod("wait_for_selector", "h1", timeout=8000),
                     ],
                     "playwright_include_page": True,
                     "fetch_date": url_data.get("fetch_date"),
@@ -131,15 +163,12 @@ class ListingSpider(scrapy.Spider):
             )
 
     async def parse(self, response):
-        """Extract listing information using Playwright page for amenities"""
         page = response.meta.get("playwright_page")
 
         try:
-            # Extract title, location
             title = response.css("h1 div::text, .b-advert-title-outer h1::text").get()
             location = response.css(".b-advert-info-statistics--region::text").get()
 
-            # Extract all key-value properties
             properties = {}
             for prop in response.css(".b-advert-attribute"):
                 key = prop.css(".b-advert-attribute__key::text").get()
@@ -147,11 +176,7 @@ class ListingSpider(scrapy.Spider):
                 if key and value:
                     properties[key.strip().rstrip(":")] = value.strip()
 
-            # Extract house details
-            house_type = None
-            bathrooms = None
-            bedrooms = None
-
+            house_type, bathrooms, bedrooms = None, None, None
             icon_details_texts = response.css(
                 ".b-advert-icon-attribute span::text, .b-advert-icon-attribute__value::text"
             ).getall()
@@ -172,62 +197,46 @@ class ListingSpider(scrapy.Spider):
             if not bathrooms:
                 bathrooms = properties.get("Bathrooms") or properties.get("Toilets")
 
-            # Amenities extraction - optimized with shorter timeout
             amenities = []
             if page:
                 try:
                     amenities_section = await asyncio.wait_for(
                         page.query_selector(".b-advert-attributes--tags"),
-                        timeout=1.5,  # Reduced from 2.0
+                        timeout=1.5,
                     )
-
                     if amenities_section:
                         amenity_elements = await page.query_selector_all(
                             ".b-advert-attributes__tag"
                         )
-
-                        amenity_tasks = [
-                            element.text_content() for element in amenity_elements
-                        ]
+                        amenity_tasks = [el.text_content() for el in amenity_elements]
                         amenity_texts = await asyncio.gather(
                             *amenity_tasks, return_exceptions=True
                         )
-
                         for text in amenity_texts:
-                            if isinstance(text, str) and text:
+                            if isinstance(text, str) and text.strip():
                                 amenity_text = text.strip()
-                                if amenity_text and amenity_text not in amenities:
+                                if amenity_text not in amenities:
                                     amenities.append(amenity_text)
+                except Exception:
+                    pass
 
-                except asyncio.TimeoutError:
-                    self.logger.debug(f"Amenities section timeout for {response.url}")
-                except Exception as e:
-                    self.logger.debug(f"Error extracting amenities: {e}")
-
-            # Extract price
             price = response.css(
                 ".b-alt-advert-price-wrapper span.qa-advert-price-view-value::text, "
                 ".b-alt-advert-price-wrapper .qa-advert-price::text, "
                 ".b-alt-advert-price-wrapper div::text"
             ).get()
 
-            # Extract description
             description = response.css(".qa-description-text::text").get()
 
             self.scraped_count += 1
-
-            # Log every 10 items with speed tracking
             if self.scraped_count % 10 == 0:
-                elapsed = (datetime.now() - self.start_time).total_seconds()
-                lpm = (self.scraped_count / elapsed) * 60 if elapsed > 0 else 0
-                self.logger.info(
-                    f"Scraped {self.scraped_count}/{self.total_listings} ({lpm:.0f} listings/min)"
-                )
+                self.update_progress()
 
             yield {
                 "url": response.url,
                 "description": description.strip() if description else None,
-                "fetch_date": response.meta.get("fetch_date"),
+                "fetch_date": response.meta.get("fetch_date")
+                or datetime.now().strftime("%Y-%m-%d"),
                 "title": title.strip() if title else None,
                 "location": location.strip() if location else None,
                 "house_type": house_type,
@@ -238,35 +247,24 @@ class ListingSpider(scrapy.Spider):
                 "price": price.strip() if price else None,
             }
 
-        except Exception as e:
-            self.logger.error(f"Error parsing {response.url}: {e}", exc_info=True)
-
+        except Exception:
+            self.failures += 1
         finally:
-            # Always close the page to save memory
             if page:
-                try:
-                    await page.close()
-                except Exception as e:
-                    self.logger.warning(f"Error closing page: {e}")
+                await page.close()
+
+    def update_progress(self, force=False):
+        elapsed = time.time() - self.start_time_ts
+        lpm = (self.scraped_count / elapsed) * 60 if elapsed > 0 else 0
+
+        sys.stdout.write(
+            f"\r⏳ Progress: [{self.scraped_count}/{self.total_listings}] "
+            f"| ⚡ Speed: {lpm:.0f} items/min          "
+        )
+        sys.stdout.flush()
 
     async def errback_close_page(self, failure):
-        """Handle request failures and close page"""
+        self.failures += 1
         page = failure.request.meta.get("playwright_page")
         if page:
-            try:
-                await page.close()
-            except Exception as e:
-                self.logger.warning(f"Error closing page in errback: {e}")
-        self.logger.error(f"Error on {failure.request.url}: {failure.value}")
-
-    def closed(self, reason):
-        """Log final stats"""
-        elapsed = (datetime.now() - self.start_time).total_seconds()
-        avg_lpm = (self.scraped_count / elapsed) * 60 if elapsed > 0 else 0
-
-        self.logger.info(f"\n{'=' * 60}")
-        self.logger.info(f"Spider closed: {reason}")
-        self.logger.info(f"Total scraped: {self.scraped_count}/{self.total_listings}")
-        self.logger.info(f"Time taken: {elapsed / 60:.1f} minutes")
-        self.logger.info(f"Average speed: {avg_lpm:.0f} listings/min")
-        self.logger.info(f"{'=' * 60}\n")
+            await page.close()

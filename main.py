@@ -1,1000 +1,271 @@
 #!/usr/bin/env python3
 
 import sys
-import os
 import pathlib
-import csv
+import os
 import pandas as pd
-from datetime import datetime
+from scrapy.utils.log import configure_logging
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
-from scripts.clean import DataCleaner
-from scripts.clean_listing import ListingDataCleaner
+from scripts.cleaner import DataCleaner
+
+# Configuration
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent
+URL_DIR = PROJECT_ROOT / "outputs" / "urls"
+DATA_DIR = PROJECT_ROOT / "outputs" / "data"
+
+for path in [URL_DIR, DATA_DIR]:
+    path.mkdir(parents=True, exist_ok=True)
+
+# --- UTILITIES ---
 
 
-def print_header():
-    print("\n" + "=" * 50)
-    print("🕷️ LISTING SCRAPER")
-    print("=" * 50 + "\n")
+def log(msg, success=True):
+    print(f" {'✅' if success else '❌'} {msg}")
 
 
-def print_separator():
-    print("-" * 50)
-
-
-def get_choice(prompt, valid_choices):
+def get_input(prompt, valid=None, is_num=False):
     while True:
-        choice = input(prompt).strip()
-        if choice in valid_choices:
-            return choice
-        print(f"❌ Invalid choice. Please enter one of: {', '.join(valid_choices)}\n")
-
-
-def get_number(prompt, min_val=1, max_val=None):
-    while True:
-        try:
-            value = int(input(prompt).strip())
-            if value < min_val:
-                print(f"❌ Please enter a number >= {min_val}\n")
+        val = input(f"\n➤ {prompt}: ").strip().lower()
+        if not val and not valid:
+            return ""
+        if valid and val not in valid:
+            print(f"   Invalid choice. Choose: {', '.join(valid)}")
+            continue
+        if is_num:
+            try:
+                return int(val)
+            except:
                 continue
-            if max_val and value > max_val:
-                print(f"❌ Please enter a number <= {max_val}\n")
-                continue
-            return value
-        except ValueError:
-            print("❌ Please enter a valid number\n")
+        return val
 
 
-def get_url(prompt, default=None):
-    while True:
-        if default:
-            url = input(f"{prompt} (default: {default})\nURL: ").strip()
-            if not url:
-                return default
-        else:
-            url = input(prompt).strip()
-
-        if url.startswith("http://") or url.startswith("https://"):
-            return url
-        else:
-            print("❌ URL must start with http:// or https://\n")
+# --- ROBUST CONSOLIDATION ---
 
 
-def list_csv_files(directory, pattern="*.csv"):
-    """List all CSV files in a directory"""
-    if not directory.exists():
-        return []
+def consolidate_data(directory, pattern, target_name, id_col="url"):
+    target_path = directory / target_name
+    all_files = [f for f in directory.glob(pattern) if f.name != target_name]
 
-    files = sorted(
-        directory.glob(pattern),
-        key=lambda x: x.stat().st_mtime,
-        reverse=True,  # Most recent first
-    )
-    return files
-
-
-def display_files(files, file_type):
-    if not files:
-        print(f"   ⚠️  No {file_type} files found")
-        return False
-
-    print(f"\n📁 Available {file_type} files:")
-    # print("-" * 70)
-
-    for idx, file in enumerate(files, 1):
-        size = file.stat().st_size / 1024  # KB
-        modified = datetime.fromtimestamp(file.stat().st_mtime)
-
-        # Count rows
-        try:
-            with open(file, "r", encoding="utf-8") as f:
-                row_count = sum(1 for _ in f) - 1  # Subtract header
-        except Exception as e:
-            print(e)
-            row_count = "?"
-
-        print(f"   [{idx}] {file.name}")
-        print(
-            f"       Size: {size:.1f} KB | Rows: {row_count:,} | Modified: {modified.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-
-    # print("-" * 80)
-    return True
-
-
-def select_file(files, file_type):
-    while True:
-        try:
-            choice = input(
-                f"\n➤ Select {file_type} file (1-{len(files)}) or 'q' to quit: "
-            ).strip()
-
-            if choice.lower() == "q":
-                return None
-
-            idx = int(choice)
-            if 1 <= idx <= len(files):
-                selected = files[idx - 1]
-                print(f"   ✅ Selected: {selected.name}")
-                return selected
-            else:
-                print(f"   ❌ Please enter a number between 1 and {len(files)}")
-        except ValueError:
-            print("   ❌ Please enter a valid number or 'q' to quit")
-        except KeyboardInterrupt:
-            print("\n\n⚠️  Cancelled by user")
-            return None
-
-
-def get_scraped_urls(scraped_csv):
-    """Extract all URLs that have been successfully scraped"""
-    scraped_urls = set()
-
-    try:
-        with open(scraped_csv, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if "url" in row and row["url"]:
-                    scraped_urls.add(row["url"].strip())
-
-        print(f"   ✅ Found {len(scraped_urls):,} scraped URLs")
-    except Exception as e:
-        print(f"   ❌ Error reading scraped data: {e}")
-
-    return scraped_urls
-
-
-def get_remaining_urls(original_csv, scraped_urls):
-    """Get URLs that haven't been scraped yet"""
-    remaining_urls = []
-    total_urls = 0
-
-    try:
-        with open(original_csv, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-
-            for row in reader:
-                if row and row[0].strip():
-                    total_urls += 1
-                    url = row[0].strip()
-
-                    if url not in scraped_urls:
-                        remaining_urls.append(row)  # Keep original row (url, page)
-
-        print(f"   ✅ Total URLs: {total_urls:,}")
-        print(f"   ✅ Remaining URLs: {len(remaining_urls):,}")
-        print(
-            f"   ✅ Completion: {len(scraped_urls):,}/{total_urls:,} ({len(scraped_urls) / total_urls * 100:.1f}%)"
-        )
-    except Exception as e:
-        print(f"   ❌ Error reading original URLs: {e}")
-
-    return remaining_urls, total_urls
-
-
-def save_remaining_urls(remaining_urls, urls_dir):
-    """Save remaining URLs to a new CSV file"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_csv = urls_dir / f"remaining_urls_{timestamp}.csv"
-
-    try:
-        output_csv.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_csv, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["url", "page", "fetch_date"])  # Write header
-            writer.writerows(remaining_urls)
-
-        print(f"   ✅ Saved {len(remaining_urls):,} remaining URLs")
-        print(f"   📄 File: {output_csv.name}")
-        return output_csv
-    except Exception as e:
-        print(f"   ❌ Error saving remaining URLs: {e}")
+    if not all_files and not target_path.exists():
         return None
 
-
-def concatenate_and_clean_data(data_dir, keep_original_columns=False):
-    """
-    Concatenate all scraped CSV files and clean the combined data.
-    """
-    print("\n" + "=" * 50)
-    print("🧹 CLEANING DATA")
-    print("=" * 50)
-
-    data_files = list_csv_files(data_dir, "listings__*.csv")
-
-    if not data_files:
-        print("\n❌ No data files found to clean")
-        return None
-
-    print(f"\n📊 Found {len(data_files)} scraped file(s)")
-
-    print("\n📥 Reading and concatenating files...")
     dfs = []
-    total_rows = 0
+    files_to_delete = []
 
-    for file in data_files:
+    if target_path.exists() and target_path.stat().st_size > 0:
         try:
-            df = pd.read_csv(file)
-            rows = len(df)
-            dfs.append(df)
-            total_rows += rows
-            print(f"   ✅ {file.name}: {rows:,} rows")
-        except Exception as e:
-            print(f"   ❌ Error reading {file.name}: {e}")
+            dfs.append(pd.read_csv(target_path))
+        except:
+            pass
+
+    for f in all_files:
+        if f.stat().st_size > 0:
+            try:
+                df = pd.read_csv(f)
+                if not df.empty:
+                    dfs.append(df)
+                    files_to_delete.append(f)
+            except:
+                continue
 
     if not dfs:
-        print("\n❌ No data could be read")
         return None
 
-    print(f"\n🔗 Concatenating {len(dfs)} file(s)...")
-    combined_df = pd.concat(dfs, ignore_index=True)
-    print(f"   ✅ Total rows before removing duplicates: {len(combined_df):,}")
+    combined = pd.concat(dfs, ignore_index=True)
 
-    if combined_df.empty:
-        print("\n⚠️  Combined dataframe is empty — nothing to clean")
-        return None
+    if "fetch_date" in combined.columns and not combined.empty:
+        combined["fetch_date"] = pd.to_datetime(combined["fetch_date"], errors="coerce")
+        combined["fetch_date"] = combined["fetch_date"].fillna(pd.Timestamp.now())
 
-    # Timestamp used for cleaned output filenames
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        combined = combined.sort_values("fetch_date", ascending=True)
+        before = len(combined)
+        combined = combined.drop_duplicates(subset=[id_col], keep="first")
 
-    # Remove duplicates based on URL
-    if "url" in combined_df.columns:
-        before_dedup = len(combined_df)
-        combined_df = combined_df.drop_duplicates(subset=["url"], keep="first")
-        after_dedup = len(combined_df)
-        duplicates_removed = before_dedup - after_dedup
+        combined["fetch_date"] = combined["fetch_date"].dt.strftime("%Y-%m-%d")
 
-        if duplicates_removed > 0:
-            print(f"   ✅ Removed {duplicates_removed:,} duplicate(s)")
-        print(f"   ✅ Total unique rows: {after_dedup:,}")
+        diff = before - len(combined)
+        if diff > 0:
+            log(f"Merged {directory.name}. Removed {diff} duplicates.")
 
-    # Merge fetch_date from combined URLs file to fill missing fetch_date values
+    combined.to_csv(target_path, index=False)
+    log(f"Updated {target_name} (Total: {len(combined)} rows)")
+
+    for f in files_to_delete:
+        try:
+            os.remove(f)
+        except:
+            pass
+
+    if files_to_delete:
+        log(f"Cleaned up {len(files_to_delete)} temporary files.")
+
+    return combined
+
+
+# --- SPIDER EXECUTION ---
+
+
+def run_spider(spider_cls, **kwargs):
+    configure_logging({"LOG_ENABLED": False})
+    settings = get_project_settings()
+    settings.update({"LOG_LEVEL": "ERROR"})
+
+    process = CrawlerProcess(settings)
+    process.crawl(spider_cls, **kwargs)
+    process.start()
+
+
+# --- MODES ---
+def mode_clean_data():
+    raw_file = DATA_DIR / "listings_combined.csv"
+    backup_file = DATA_DIR / "backup.csv"
+    clean_file = DATA_DIR / "untouched_raw_original.csv"
+
+    if not raw_file.exists():
+        return log("No listings_combined.csv found to clean.", False)
+
+    # 1. LOAD & BACKUP
+    df = pd.read_csv(raw_file)
+    df.to_csv(backup_file, index=False)
+    log(f"Safety backup created: {backup_file.name}")
+
+    # 2. RUN FULL CLEANING PIPE
+
     try:
-        urls_file = (
-            pathlib.Path(__file__).resolve().parents[0]
-            / "outputs"
-            / "urls"
-            / "combined_urls.csv"
+        cleaner = DataCleaner(df)
+        # Execute EVERY step in order
+        df_final = (
+            cleaner.extract_sub_location()
+            .fill_missing_house_type()
+            .clean_bathrooms_bedrooms()
+            .extract_properties()
+            .extract_amenities()
+            .extract_facilities()
+            .clean_price()
+            .remove_sale_and_short_term()
+            .select_columns()
+            .get_df()
         )
-        if urls_file.exists():
-            urls_df = pd.read_csv(urls_file, usecols=["url", "fetch_date"])
-            urls_df["fetch_date"] = pd.to_datetime(
-                urls_df["fetch_date"], errors="coerce"
-            )
-            combined_df = combined_df.merge(
-                urls_df, on="url", how="left", suffixes=("", "_url")
-            )
-            if "fetch_date_url" in combined_df.columns:
-                combined_df["fetch_date"] = pd.to_datetime(
-                    combined_df.get("fetch_date"), errors="coerce"
-                )
-                combined_df["fetch_date"] = combined_df["fetch_date"].fillna(
-                    combined_df["fetch_date_url"]
-                )
-                combined_df = combined_df.drop(columns=["fetch_date_url"])
+
+        # 3. SAVE CLEANED VERSION
+        df_final.to_csv(clean_file, index=False)
+        log(f"Cleaning Success! {len(df_final)} rows saved to listings_combined.csv")
     except Exception as e:
-        print(f"   ⚠️ Could not merge fetch_date from URLs: {e}")
-
-    # Merge into a single combined file `listings_combined.csv`
-    combined_file = data_dir / "listings_combined.csv"
-
-    # If there is no `listings_combined.csv` but there are timestamped combined files,
-    # promote the most recent timestamped file to `listings_combined.csv` so we don't lose old data.
-    try:
-        ts_candidates = sorted(
-            list(data_dir.glob("listings_combined_*.csv")),
-            key=lambda x: x.stat().st_mtime,
-            reverse=True,
-        )
-        if not combined_file.exists() and ts_candidates:
-            latest_ts = ts_candidates[0]
-            try:
-                existing_from_ts = pd.read_csv(latest_ts)
-                existing_from_ts.to_csv(combined_file, index=False)
-                print(f"   ✅ Promoted {latest_ts.name} to {combined_file.name}")
-            except Exception as e:
-                print(f"   ⚠️ Could not promote {latest_ts.name}: {e}")
-    except Exception:
-        # If filesystem/stat fails, continue gracefully
-        pass
-
-    if combined_file.exists():
-        try:
-            existing = pd.read_csv(combined_file)
-            # Ensure same columns
-            if "url" in existing.columns:
-                # Find new rows (by url) that are not in existing file
-                existing_urls = set(existing["url"].astype(str).str.strip())
-                new_rows = combined_df[
-                    ~combined_df["url"].astype(str).str.strip().isin(existing_urls)
-                ]
-
-                if not new_rows.empty:
-                    updated = pd.concat([existing, new_rows], ignore_index=True)
-                    updated.to_csv(combined_file, index=False)
-                    print(
-                        f"   ✅ Merged {len(new_rows):,} new row(s) into: {combined_file.name}"
-                    )
-                else:
-                    print(f"   ✅ No new rows to add to: {combined_file.name}")
-                # Use the updated dataframe for cleaning
-                combined_df = pd.read_csv(combined_file)
-            else:
-                # If existing file lacks expected columns, replace it
-                combined_df.to_csv(combined_file, index=False)
-                print(f"   ✅ Overwrote malformed combined file: {combined_file.name}")
-        except Exception as e:
-            print(
-                f"   ⚠️  Error reading existing combined file: {e}\n   Overwriting with new combined dataframe."
-            )
-            combined_df.to_csv(combined_file, index=False)
-    else:
-        combined_df.to_csv(combined_file, index=False)
-        print(f"   ✅ Created combined file: {combined_file.name}")
-
-    # Clean the data
-    print("\n🧼 Cleaning data)...")
-    try:
-        cleaner = DataCleaner(keep_original_columns=keep_original_columns)
-        cleaner.df = combined_df
-
-        cleaner.extract_sub_location()
-        cleaner.fill_missing_house_type()
-        cleaner.clean_bathrooms_bedrooms()
-        cleaner.extract_properties()
-        cleaner.extract_amenities()
-        cleaned_df = cleaner.get_dataframe()
-
-        # Save cleaned file (timestamped)
-        cleaned_path = data_dir / f"listings_cleaned_{timestamp}.csv"
-        cleaned_df.to_csv(cleaned_path, index=False)
-
-        print("\n✅ Cleaning completed!")
-        print(f"   📄 Output file: {cleaned_path.name}")
-        print(f"   📊 Final rows: {len(cleaned_df):,}")
-        print(f"   📋 Final columns: {len(cleaned_df.columns)}")
-
-        return cleaned_path
-
-    except Exception as e:
-        print(f"\n❌ Error during cleaning: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return None
+        log(f"Cleaning process failed: {e}", False)
 
 
-def clean_single_file(file_path, keep_original_columns=False):
-    """
-    Clean a single scraped CSV file.
-    """
-    print("\n" + "=" * 50)
-    print("🧹 CLEANING DATA")
-    print("=" * 50)
-
-    print(f"\n📥 Reading file: {file_path.name}")
-
-    try:
-        # Skip if file is empty or contains only header
-        p = pathlib.Path(file_path)
-        try:
-            size = p.stat().st_size
-        except Exception:
-            size = None
-
-        if size == 0:
-            print(f"\n⚠️  File is empty: {file_path.name} — skipping cleaning")
-            return None
-
-        # Quick line count check (if only header present)
-        try:
-            with open(p, "r", encoding="utf-8") as tf:
-                lines = sum(1 for _ in tf)
-        except Exception:
-            lines = None
-
-        if lines is not None and lines <= 1:
-            print(f"\n⚠️  File has no data rows: {file_path.name} — skipping cleaning")
-            return None
-
-        # Clean the data
-        print("\n🧼 Cleaning data)...")
-        cleaner = DataCleaner(keep_original_columns=keep_original_columns)
-        try:
-            cleaner.load_data(str(file_path))
-        except pd.errors.EmptyDataError:
-            print(f"\n⚠️  No data found in {file_path.name} (EmptyDataError). Skipping.")
-            return None
-
-        initial_rows = len(cleaner.df)
-        print(f"   ✅ Loaded {initial_rows:,} rows")
-
-        cleaner.extract_sub_location()
-        cleaner.fill_missing_house_type()
-        cleaner.clean_bathrooms_bedrooms()
-        cleaner.extract_properties()
-        cleaner.extract_amenities()
-        cleaned_df = cleaner.get_dataframe()
-
-        # Save cleaned file (overwrite original or create new)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        cleaned_path = file_path.parent / f"listings_cleaned_{timestamp}.csv"
-        cleaned_df.to_csv(cleaned_path, index=False)
-
-        print("\n✅ Cleaning completed!")
-        print(f"   📄 Output file: {cleaned_path.name}")
-        print(f"   📊 Final rows: {len(cleaned_df):,}")
-        print(f"   📋 Final columns: {len(cleaned_df.columns)}")
-
-        return cleaned_path
-
-    except Exception as e:
-        print(f"\n❌ Error during cleaning: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return None
-
-
-def run_urlspider(base_url, start_page, total_listings):
-    """Run the URL spider to collect listing URLs."""
-    import math
-
-    max_page = start_page + math.ceil(total_listings / 20) - 1
-
-    print(f"\n{'=' * 60}")
-    print("🚀 Starting URL Spider")
-    print(f"🌐 Base URL: {base_url}")
-    print(f"📊 Total listings: {total_listings}")
-    print(f"📄 Pages: {start_page} to {max_page}")
-    print(f"{'=' * 50}\n")
+def mode_url_spider():
+    url = (
+        input("\nBase URL (Default Jiji): ")
+        or "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
+    )
+    total = get_input("Total listings to scrape", is_num=True)
 
     from scrappers.spiders.urlspider import UrlSpider
 
-    settings = get_project_settings()
-    settings.update(
-        {
-            "DOWNLOAD_HANDLERS": {
-                "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-                "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-            },
-            "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
-            "PLAYWRIGHT_BROWSER_TYPE": "chromium",
-            "PLAYWRIGHT_LAUNCH_OPTIONS": {
-                "headless": True,
-            },
-            "LOG_LEVEL": "INFO",
-        }
-    )
-
-    process = CrawlerProcess(settings)
-    process.crawl(
-        UrlSpider, baseUrl=base_url, startPage=start_page, totalListings=total_listings
-    )
-    process.start()
-
-    # print(f"\n{'=' * 50}")
-    print("✅ URL Spider completed!")
-
-    # Combine all URL files into one
-    from scripts.clean import combine_urls
-
-    combine_urls()
+    run_spider(UrlSpider, baseUrl=url, startPage=1, totalListings=total)
+    consolidate_data(URL_DIR, "listingURLS_*.csv", "combined_urls.csv")
 
 
-def run_listingspider(csv_path, auto_clean=True, keep_original_columns=False):
-    """
-    Run the listing spider to extract detailed information.
+def mode_listing_spider(csv_path=None):
+    is_resume = csv_path is not None
+    if not csv_path:
+        files = sorted(
+            URL_DIR.glob("*.csv"), key=lambda x: x.stat().st_mtime, reverse=True
+        )
+        if not files:
+            return log("No URL files found.", False)
 
-    Args:
-        csv_path: Path to the CSV file with URLs
-        auto_clean: If True, automatically clean data after scraping
-        keep_original_columns: If False, drops original columns after transformation
-    """
-    print(f"\n{'=' * 50}")
-    print("🚀 Starting Listing Spider")
-    print(f"📂 CSV file: {csv_path}")
-    print(f"{'=' * 50}\n")
+        print("\n📂 Available URL sources:")
+        for i, f in enumerate(files[:10], 1):
+            print(f"  [{i}] {f.name}")
+        idx = get_input("Select file index", is_num=True)
+        csv_path = files[idx - 1]
 
     from scrappers.spiders.listingspider import ListingSpider
 
-    settings = get_project_settings()
-    process = CrawlerProcess(settings)
-    process.crawl(ListingSpider, csv_path=csv_path)
-    process.start()
-
-    # print(f"\n{'=' * 60}")
-    print("✅ Listing Spider completed!")
-    # print(f"{'=' * 60}\n")
-
-    # Auto-clean if enabled
-    if auto_clean:
-        PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[0]
-        data_dir = PROJECT_ROOT / "outputs" / "data"
-
-        # Find the most recent scraped file
-        data_files = list_csv_files(data_dir, "listings__*.csv")
-        if data_files:
-            latest_file = data_files[0]  # Already sorted by most recent
-            clean_single_file(latest_file, keep_original_columns=keep_original_columns)
-
-
-def interactive_url_spider():
-    """Interactive flow for URL spider"""
-    print("\n📋 URL SPIDER CONFIGURATION")
-    # print("This spider will collect property listing URLs from a website")
-    print_separator()
-
-    print("\nURL Configuration:")
-    print("  1. Use default (Jiji.com.gh Greater Accra rentals)")
-    print("  2. Enter custom URL")
-
-    url_choice = get_choice("\nChoice (1-2): ", ["1", "2"])
-
-    if url_choice == "1":
-        base_url = (
-            "https://jiji.com.gh/greater-accra/houses-apartments-for-rent?page={}"
-        )
-        print("✓ Using default url!")
-    else:
-        print("\n💡 Your URL should contain {{}} where the page number goes")
-        print("   Example: https://example.com/listings?page={}")
-        base_url = get_url("\nEnter base URL: ")
-
-        if "{}" not in base_url:
-            print("\n⚠️  Warning: URL doesn't contain {{}} for page numbers")
-            add_placeholder = get_choice(
-                "Add ?page={{}} to the end? (y/n): ", ["y", "n", "Y", "N"]
-            )
-            if add_placeholder.lower() == "y":
-                base_url += "?page={}"
-
-    print_separator()
-
-    start_page = 1
-
-    total_listings = get_number("Total number of listings on the site: ", min_val=1)
-
-    import math
-
-    max_page = start_page + math.ceil(total_listings / 20) - 1
-    total_pages = max_page - start_page + 1
-
-    print("\n📊 Summary:")
-    print(f"   • Base URL: {base_url}")
-    print(f"   • Start page: {start_page}")
-    print(f"   • Total listings: {total_listings}")
-    print(f"   • Calculated end page: {max_page}")
-    print(f"   • Total pages to scrape: {total_pages} (20 listings per page)")
-
-    confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
-
-    if confirm.lower() == "y":
-        run_urlspider(base_url, start_page, total_listings)
-    else:
-        print("\n❌ Cancelled\n")
-
-
-def interactive_listing_spider():
-    """Interactive flow for listing spider"""
-    print("\n📋 LISTING SPIDER CONFIGURATION\n")
-    # print("This spider will extract detailed information from listing URLs")
-    print_separator()
-
-    PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[0]
-    urls_dir = PROJECT_ROOT / "outputs" / "urls"
-
-    # Check for available CSVs
-    csv_files = list_csv_files(urls_dir, "*.csv")
-
-    if not csv_files:
-        print("\n❌ No CSV files found in outputs/urls/")
-        print("Please run the URL spider first to collect URLs.\n")
-
-        manual = get_choice("Enter a CSV path manually? (y/n): ", ["y", "n", "Y", "N"])
-        if manual.lower() == "y":
-            csv_path = input("\nEnter CSV file path: ").strip()
-            if not os.path.exists(csv_path):
-                print(f"\n❌ File not found: {csv_path}\n")
-                return
-        else:
-            return
-    else:
-        print(f"\nFound {len(csv_files)} CSV file(s):\n")
-
-        for i, csv_file in enumerate(csv_files[:10], 1):  # Show max 10
-            filename = csv_file.name
-            file_size = csv_file.stat().st_size / 1024  # KB
-            modified = datetime.fromtimestamp(csv_file.stat().st_mtime)
-            print(
-                f"  {i}. {filename} ({file_size:.1f} KB) - {modified.strftime('%Y-%m-%d %H:%M')}"
-            )
-
-        if len(csv_files) > 10:
-            print(f"  ... and {len(csv_files) - 10} more")
-
-        print("\n  0. Enter custom path")
-        print_separator()
-
-        choice = get_number(
-            f"\nSelect CSV file (0-{min(len(csv_files), 10)}): ",
-            min_val=0,
-            max_val=min(len(csv_files), 10),
-        )
-
-        if choice == 0:
-            csv_path = input("\nEnter CSV file path: ").strip()
-            if not os.path.exists(csv_path):
-                print(f"\n❌ File not found: {csv_path}\n")
-                return
-        else:
-            csv_path = str(csv_files[choice - 1])
-
-    try:
-        with open(csv_path, "r") as f:
-            line_count = sum(1 for _ in f) - 1  # -1 for header
-        print(f"\n📊 This CSV contains {line_count:,} URL(s)")
-    except Exception as e:
-        print(e)
-        pass
-
-    print(f"\n✓ Selected: {os.path.basename(csv_path)}")
-
-    # preferences
-    print_separator()
-    print("\n🧹 Cleaning Options:")
-    auto_clean = get_choice("Clean data after scraping? (y/n): ", ["y", "n", "Y", "N"])
-
-    keep_original = False
-    if auto_clean.lower() == "y":
-        keep_original = get_choice(
-            "Keep original columns? (y/n): ", ["y", "n", "Y", "N"]
-        )
-        keep_original = keep_original.lower() == "y"
-
-    confirm = get_choice("\nProceed? (y/n): ", ["y", "n", "Y", "N"])
-
-    if confirm.lower() == "y":
-        run_listingspider(
-            csv_path,
-            auto_clean=(auto_clean.lower() == "y"),
-            keep_original_columns=keep_original,
-        )
-    else:
-        print("\n❌ Cancelled\n")
-
-
-def interactive_resume_scraper():
-    """Interactive flow for resuming scraping"""
-    print("\n📋 RESUME SCRAPER\n")
-    print("Find remaining URLs and continue scraping from where you left off")
-    print_separator()
-
-    PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[0]
-    urls_dir = PROJECT_ROOT / "outputs" / "urls"
-    data_dir = PROJECT_ROOT / "outputs" / "data"
-
-    # Step 1: Select original URLs file
-    print("\n📌 STEP 1: Select the original URLs file")
-    urls_files = list_csv_files(urls_dir, "*.csv")
-
-    if not display_files(urls_files, "URL"):
-        print("\n❌ No URL files found. Please run the URL spider first.")
-        return
-
-    original_csv = select_file(urls_files, "URL")
-    if not original_csv:
-        return
-
-    # Step 2: Select scraped data file
-    print("\n📌 STEP 2: Select the scraped data file")
-    # Look for both raw scraped files and combined files (e.g. listings_combined_...)
-    data_files = []
-    for pattern in (
-        "listings__*.csv",
-        "listings_combined_*.csv",
-        "listings_combined.csv",
-    ):
-        data_files.extend(list_csv_files(data_dir, pattern))
-
-    # Deduplicate while preserving order
-    seen = set()
-    unique_files = []
-    for f in data_files:
-        if f not in seen:
-            seen.add(f)
-            unique_files.append(f)
-    data_files = unique_files
-
-    if not display_files(data_files, "scraped data"):
-        print("\n⚠️  No scraped data files found.")
-        choice = (
-            input("\n➤ Continue anyway? This will create a file with all URLs. (y/n): ")
-            .strip()
-            .lower()
-        )
-        if choice != "y":
-            return
-        scraped_csv = None
-    else:
-        scraped_csv = select_file(data_files, "scraped data")
-        if not scraped_csv:
-            return
-
-    # Step 3: Process files
-    print("\n" + "=" * 50)
-    print("\n🔍 Processing files...".center(80))
-    print("=" * 50)
-
-    # Get scraped URLs
-    print("\n📊 Reading scraped data...")
-    scraped_urls = get_scraped_urls(scraped_csv) if scraped_csv else set()
-
-    if not scraped_urls and scraped_csv:
-        print("\n⚠️  Warning: No scraped URLs found in the selected file.")
-
-    # Get remaining URLs
-    print("\n📊 Finding remaining URLs...")
-    remaining_urls, total_urls = get_remaining_urls(original_csv, scraped_urls)
-
-    if not remaining_urls:
-        print("\n" + "=" * 50)
-        print("🎉 ALL URLS HAVE BEEN SCRAPED!")
-        print("=" * 50)
-
-        # Offer to clean and concatenate all data
-        clean_all = get_choice(
-            "\n🧹 Clean and concatenate all scraped data? (y/n): ", ["y", "n", "Y", "N"]
-        )
-        if clean_all.lower() == "y":
-            keep_original = get_choice(
-                "Keep original columns? (y/n): ", ["y", "n", "Y", "N"]
-            )
-            concatenate_and_clean_data(
-                data_dir, keep_original_columns=(keep_original.lower() == "y")
-            )
-
-        return
-
-    # Save remaining URLs
-    print("\n📊 Saving remaining URLs...")
-    output_csv = save_remaining_urls(remaining_urls, urls_dir)
-
-    if output_csv:
-        # Final summary
-        print("\n✅ SUCCESS!".center(80))
-        print("=" * 50)
-        print("\n\n📊 Summary:")
-        print(f"   • Total URLs: {total_urls:,}")
-        print(
-            f"   • Already scraped: {len(scraped_urls):,} ({len(scraped_urls) / total_urls * 100:.1f}%)"
-        )
-        print(
-            f"   • Remaining: {len(remaining_urls):,} ({len(remaining_urls) / total_urls * 100:.1f}%)"
-        )
-
-        # Ask if user wants to start scraping now
-        print("\n" + "=" * 50)
-        start_now = get_choice(
-            "\n🚀 Start scraping the remaining URLs now? (y/n): ", ["y", "n", "Y", "N"]
-        )
-
-        if start_now.lower() == "y":
-            # Ask about cleaning
-            auto_clean = get_choice(
-                "Auto-clean after scraping? (y/n): ", ["y", "n", "Y", "N"]
-            )
-            keep_original = False
-            if auto_clean.lower() == "y":
-                keep_original = get_choice(
-                    "Keep original columns? (y/n): ", ["y", "n", "Y", "N"]
-                )
-                keep_original = keep_original.lower() == "y"
-
-            run_listingspider(
-                str(output_csv),
-                auto_clean=(auto_clean.lower() == "y"),
-                keep_original_columns=keep_original,
-            )
-
-            # After resuming, offer to concatenate and clean all
-            concat_all = get_choice(
-                "\n🔗 Concatenate and clean all scraped data? (y/n): ",
-                ["y", "n", "Y", "N"],
-            )
-            if concat_all.lower() == "y":
-                concatenate_and_clean_data(
-                    data_dir, keep_original_columns=keep_original
-                )
-        else:
-            print("\n📝 You can resume later with this command:")
-            print(
-                f'\n   scrapy crawl listingspider -a csv_path="{output_csv.relative_to(PROJECT_ROOT)}"'
-            )
-            print()
-    else:
-        print("\n❌ Failed to save remaining URLs")
-
-
-# Add this import at the top with other imports
-from scripts.clean_listing import ListingDataCleaner
-
-
-# Add this new function anywhere before main()
-def interactive_process_listings():
-    """Interactive flow for processing/cleaning listing data"""
-    print("\n📋 PROCESS LISTING DATA\n")
-    print("Clean and filter rental listings data")
-    print_separator()
-
-    PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[0]
-    data_dir = PROJECT_ROOT / "outputs" / "data"
-
-    # Look for cleaned listing files
-    data_files = list_csv_files(data_dir, "listings_cleaned_*.csv")
-
-    # Also include listings_combined.csv if it exists
-    combined_file = data_dir / "listings_combined.csv"
-    if combined_file.exists():
-        data_files.insert(0, combined_file)
-
-    if not data_files:
-        print("\n❌ No listing files found in outputs/data/")
-        print("Please run the listing spider first or ensure you have cleaned data.\n")
-        return
-
-    # Display available files
-    if not display_files(data_files, "listing data"):
-        return
-
-    # Select file
-    selected_file = select_file(data_files, "listing data")
-    if not selected_file:
-        return
-
-    # Confirm processing
-    print("\n" + "=" * 50)
-    print("📊 Processing Summary:")
-    print(f"   • Input file: {selected_file.name}")
-    print(f"   • This will:")
-    print("     - Select relevant columns")
-    print("     - Drop missing Condition values")
-    print("     - Clean property size data")
-    print("     - Remove sale and short-term listings")
-    print_separator()
-
-    confirm = get_choice("\nProceed with processing? (y/n): ", ["y", "n", "Y", "N"])
-
-    if confirm.lower() != "y":
-        print("\n❌ Cancelled\n")
-        return
-
-    # Process the file
-    try:
-        print("\n" + "=" * 50)
-        print("🚀 Starting Processing")
-        print("=" * 50 + "\n")
-
-        # Create cleaner and process
-        cleaner = ListingDataCleaner(verbose=True)
-        cleaned_df = cleaner.load_data(str(selected_file)).clean_all()
-
-        # Save processed file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = data_dir / f"listings_processed_{timestamp}.csv"
-        cleaner.save_data(str(output_path))
-
-        print("\n" + "=" * 50)
-        print("✅ PROCESSING COMPLETE!")
-        print("=" * 50)
-        print(f"\n📄 Saved to: {output_path.name}")
-        print(f"📊 Final rows: {len(cleaned_df):,}")
-        print(f"📋 Columns: {len(cleaned_df.columns)}")
-
-        if cleaner.n_removed > 0:
-            print(f"\n🗑️ Removed {cleaner.n_removed:,} unwanted listings")
-
-            # Ask if user wants to save removed listings
-            save_removed = get_choice(
-                "\nSave removed listings to separate file? (y/n): ",
-                ["y", "n", "Y", "N"],
-            )
-            if save_removed.lower() == "y":
-                removed_path = data_dir / f"listings_removed_{timestamp}.csv"
-                cleaner.get_removed_dataframe().to_csv(removed_path, index=False)
-                print(f"   ✅ Saved removed listings to: {removed_path.name}")
-
-    except Exception as e:
-        print(f"\n❌ Error during processing: {e}")
-        import traceback
-
-        traceback.print_exc()
-
-
-# Update the main() function menu to include the new option:
+    run_spider(ListingSpider, csv_path=str(csv_path))
+    consolidate_data(DATA_DIR, "listings__*.csv", "listings_combined.csv")
+
+    if is_resume and os.path.exists(csv_path):
+        os.remove(csv_path)
+
+
+def mode_resume():
+    url_file = URL_DIR / "combined_urls.csv"
+    scraped_file = DATA_DIR / "listings_combined.csv"
+
+    consolidate_data(URL_DIR, "listingURLS_*.csv", "combined_urls.csv")
+
+    if not url_file.exists():
+        return log("No combined_urls.csv found.", False)
+
+    df_urls = pd.read_csv(url_file)
+    scraped_urls = (
+        pd.read_csv(scraped_file)["url"].unique() if scraped_file.exists() else []
+    )
+
+    remaining_df = df_urls[~df_urls["url"].isin(scraped_urls)]
+
+    if remaining_df.empty:
+        return log("All URLs have already been scraped.")
+
+    log(f"Remaining: {len(remaining_df)} / {len(df_urls)}")
+    if get_input("Resume now? (y/n)", valid=["y", "n"]) == "y":
+        res_path = URL_DIR / "resume_queue.csv"
+        remaining_df.to_csv(res_path, index=False)
+        mode_listing_spider(csv_path=res_path)
+
+
+def show_stats():
+    url_file = URL_DIR / "combined_urls.csv"
+    data_file = DATA_DIR / "listings_combined.csv"
+
+    urls = len(pd.read_csv(url_file)) if url_file.exists() else 0
+    scraped = len(pd.read_csv(data_file)) if data_file.exists() else 0
+
+    print(f"\n{'=' * 30}")
+    print("📊 CURRENT DATABASE STATS")
+    print(f"{'=' * 30}")
+    print(f"🔗 Total URLs:     {urls}")
+    print(f"🏠 Scraped Items:  {scraped}")
+    print(f"⏳ Pending:        {max(0, urls - scraped)}")
+    print(f"{'=' * 30}")
+
+
+# --- MAIN ---
+
+
 def main():
-    """Main interactive loop"""
-    try:
-        while True:
-            print_header()
+    menu = {
+        "1": ("🔗 URL Spider", mode_url_spider),
+        "2": ("📝 Listing Spider", mode_listing_spider),
+        "3": ("🔄 Resume Scraper", mode_resume),
+        "4": (
+            "🧹 Maintenance (Sync & Clean)",
+            lambda: [
+                consolidate_data(URL_DIR, "listingURLS_*.csv", "combined_urls.csv"),
+                consolidate_data(DATA_DIR, "listings__*.csv", "listings_combined.csv"),
+            ],
+        ),
+        "5": ("📊 Show Stats", show_stats),
+        "6": ("🧹 Clean & Backup Data", mode_clean_data),
+        "7": ("❌ Exit", sys.exit),
+    }
 
-            print("Which spider would you like to run?\n")
-            print("  1. 🔗 URL Spider         - Collect listing URLs from search pages")
-            print("  2. 📝 Listing Spider     - Extract details from collected URLs")
-            print("  3. 🔄 Resume Scraper     - Continue from where you left off")
-            print("  4. 🧹 Process Listings   - Clean and filter rental data")
-            print("  5. ❌ Exit\n")
-            print_separator()
+    while True:
+        print(f"\n{'=' * 40}\n   🕷️  JIJI PROPERTY SCRAPER\n{'=' * 40}")
+        for k, v in menu.items():
+            print(f"  {k}. {v[0]}")
 
-            choice = get_choice(
-                "\nEnter your choice (1-5): ", ["1", "2", "3", "4", "5"]
-            )
-
-            if choice == "1":
-                interactive_url_spider()
-            elif choice == "2":
-                interactive_listing_spider()
-            elif choice == "3":
-                interactive_resume_scraper()
-            elif choice == "4":
-                interactive_process_listings()
-            elif choice == "5":
-                print("\n👋 Goodbye!\n")
-                sys.exit(0)
-
-            print_separator()
-            another = get_choice("\nRun another task? (y/n): ", ["y", "n", "Y", "N"])
-            if another.lower() != "y":
-                print("\n👋 Goodbye!\n")
-                break
-
-    except KeyboardInterrupt:
-        print("\n\n👋 Interrupted by user. Goodbye!\n")
-        sys.exit(0)
-    except Exception as e:
-        print(f"\n❌ Error: {e}\n")
-        sys.exit(1)
-
-
-# def main():
-#     """Main interactive loop"""
-#     try:
-#         while True:
-#             print_header()
-
-#             print("Which spider would you like to run?\n")
-#             print("  1. 🔗 URL Spider      - Collect listing URLs from search pages")
-#             print("  2. 📝 Listing Spider  - Extract details from collected URLs")
-#             print("  3. 🔄 Resume Scraper  - Continue from where you left off")
-#             print("  4. ❌ Exit\n")
-#             print_separator()
-
-#             choice = get_choice("\nEnter your choice (1-4): ", ["1", "2", "3", "4"])
-
-#             if choice == "1":
-#                 interactive_url_spider()
-#             elif choice == "2":
-#                 interactive_listing_spider()
-#             elif choice == "3":
-#                 interactive_resume_scraper()
-#             elif choice == "4":
-#                 print("\n👋 Goodbye!\n")
-#                 sys.exit(0)
-
-#             print_separator()
-#             another = get_choice("\nRun another task? (y/n): ", ["y", "n", "Y", "N"])
-#             if another.lower() != "y":
-#                 print("\n👋 Goodbye!\n")
-#                 break
-
-#     except KeyboardInterrupt:
-#         print("\n\n👋 Interrupted by user. Goodbye!\n")
-#         sys.exit(0)
-#     except Exception as e:
-#         print(f"\n❌ Error: {e}\n")
-#         sys.exit(1)
+        choice = get_input("Select", valid=menu.keys())
+        try:
+            menu[choice][1]()
+        except KeyboardInterrupt:
+            print("\nStopped by user.")
+        except Exception as e:
+            log(f"Error: {e}", False)
 
 
 if __name__ == "__main__":
