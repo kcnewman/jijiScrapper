@@ -9,6 +9,7 @@ from datetime import datetime
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 from scripts.clean import DataCleaner
+from scripts.clean_listing import ListingDataCleaner
 
 
 def print_header():
@@ -817,6 +818,102 @@ def interactive_resume_scraper():
         print("\n❌ Failed to save remaining URLs")
 
 
+# Add this import at the top with other imports
+from scripts.clean_listing import ListingDataCleaner
+
+
+# Add this new function anywhere before main()
+def interactive_process_listings():
+    """Interactive flow for processing/cleaning listing data"""
+    print("\n📋 PROCESS LISTING DATA\n")
+    print("Clean and filter rental listings data")
+    print_separator()
+
+    PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[0]
+    data_dir = PROJECT_ROOT / "outputs" / "data"
+
+    # Look for cleaned listing files
+    data_files = list_csv_files(data_dir, "listings_cleaned_*.csv")
+
+    # Also include listings_combined.csv if it exists
+    combined_file = data_dir / "listings_combined.csv"
+    if combined_file.exists():
+        data_files.insert(0, combined_file)
+
+    if not data_files:
+        print("\n❌ No listing files found in outputs/data/")
+        print("Please run the listing spider first or ensure you have cleaned data.\n")
+        return
+
+    # Display available files
+    if not display_files(data_files, "listing data"):
+        return
+
+    # Select file
+    selected_file = select_file(data_files, "listing data")
+    if not selected_file:
+        return
+
+    # Confirm processing
+    print("\n" + "=" * 50)
+    print("📊 Processing Summary:")
+    print(f"   • Input file: {selected_file.name}")
+    print(f"   • This will:")
+    print("     - Select relevant columns")
+    print("     - Drop missing Condition values")
+    print("     - Clean property size data")
+    print("     - Remove sale and short-term listings")
+    print_separator()
+
+    confirm = get_choice("\nProceed with processing? (y/n): ", ["y", "n", "Y", "N"])
+
+    if confirm.lower() != "y":
+        print("\n❌ Cancelled\n")
+        return
+
+    # Process the file
+    try:
+        print("\n" + "=" * 50)
+        print("🚀 Starting Processing")
+        print("=" * 50 + "\n")
+
+        # Create cleaner and process
+        cleaner = ListingDataCleaner(verbose=True)
+        cleaned_df = cleaner.load_data(str(selected_file)).clean_all()
+
+        # Save processed file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = data_dir / f"listings_processed_{timestamp}.csv"
+        cleaner.save_data(str(output_path))
+
+        print("\n" + "=" * 50)
+        print("✅ PROCESSING COMPLETE!")
+        print("=" * 50)
+        print(f"\n📄 Saved to: {output_path.name}")
+        print(f"📊 Final rows: {len(cleaned_df):,}")
+        print(f"📋 Columns: {len(cleaned_df.columns)}")
+
+        if cleaner.n_removed > 0:
+            print(f"\n🗑️ Removed {cleaner.n_removed:,} unwanted listings")
+
+            # Ask if user wants to save removed listings
+            save_removed = get_choice(
+                "\nSave removed listings to separate file? (y/n): ",
+                ["y", "n", "Y", "N"],
+            )
+            if save_removed.lower() == "y":
+                removed_path = data_dir / f"listings_removed_{timestamp}.csv"
+                cleaner.get_removed_dataframe().to_csv(removed_path, index=False)
+                print(f"   ✅ Saved removed listings to: {removed_path.name}")
+
+    except Exception as e:
+        print(f"\n❌ Error during processing: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+# Update the main() function menu to include the new option:
 def main():
     """Main interactive loop"""
     try:
@@ -824,13 +921,16 @@ def main():
             print_header()
 
             print("Which spider would you like to run?\n")
-            print("  1. 🔗 URL Spider      - Collect listing URLs from search pages")
-            print("  2. 📝 Listing Spider  - Extract details from collected URLs")
-            print("  3. 🔄 Resume Scraper  - Continue from where you left off")
-            print("  4. ❌ Exit\n")
+            print("  1. 🔗 URL Spider         - Collect listing URLs from search pages")
+            print("  2. 📝 Listing Spider     - Extract details from collected URLs")
+            print("  3. 🔄 Resume Scraper     - Continue from where you left off")
+            print("  4. 🧹 Process Listings   - Clean and filter rental data")
+            print("  5. ❌ Exit\n")
             print_separator()
 
-            choice = get_choice("\nEnter your choice (1-4): ", ["1", "2", "3", "4"])
+            choice = get_choice(
+                "\nEnter your choice (1-5): ", ["1", "2", "3", "4", "5"]
+            )
 
             if choice == "1":
                 interactive_url_spider()
@@ -839,6 +939,8 @@ def main():
             elif choice == "3":
                 interactive_resume_scraper()
             elif choice == "4":
+                interactive_process_listings()
+            elif choice == "5":
                 print("\n👋 Goodbye!\n")
                 sys.exit(0)
 
@@ -854,6 +956,45 @@ def main():
     except Exception as e:
         print(f"\n❌ Error: {e}\n")
         sys.exit(1)
+
+
+# def main():
+#     """Main interactive loop"""
+#     try:
+#         while True:
+#             print_header()
+
+#             print("Which spider would you like to run?\n")
+#             print("  1. 🔗 URL Spider      - Collect listing URLs from search pages")
+#             print("  2. 📝 Listing Spider  - Extract details from collected URLs")
+#             print("  3. 🔄 Resume Scraper  - Continue from where you left off")
+#             print("  4. ❌ Exit\n")
+#             print_separator()
+
+#             choice = get_choice("\nEnter your choice (1-4): ", ["1", "2", "3", "4"])
+
+#             if choice == "1":
+#                 interactive_url_spider()
+#             elif choice == "2":
+#                 interactive_listing_spider()
+#             elif choice == "3":
+#                 interactive_resume_scraper()
+#             elif choice == "4":
+#                 print("\n👋 Goodbye!\n")
+#                 sys.exit(0)
+
+#             print_separator()
+#             another = get_choice("\nRun another task? (y/n): ", ["y", "n", "Y", "N"])
+#             if another.lower() != "y":
+#                 print("\n👋 Goodbye!\n")
+#                 break
+
+#     except KeyboardInterrupt:
+#         print("\n\n👋 Interrupted by user. Goodbye!\n")
+#         sys.exit(0)
+#     except Exception as e:
+#         print(f"\n❌ Error: {e}\n")
+#         sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -194,11 +194,11 @@ class DataCleaner:
 
         return self
 
-    def clean_price(self) -> "DataCleaner":
-        """Clean price column by removing currency symbols and converting to float."""
-        if "price" not in self.df.columns:
-            self._log("⚠️ No 'price' column found, skipping price cleaning")
-            return self
+        # def clean_price(self) -> "DataCleaner":
+        #     """Clean price column by removing currency symbols and converting to float."""
+        #     if "price" not in self.df.columns:
+        #         self._log("⚠️ No 'price' column found, skipping price cleaning")
+        #         return self
 
         self._log("💰 Cleaning price data...")
 
@@ -230,7 +230,7 @@ class DataCleaner:
         self.extract_properties()
         self.extract_amenities()
         self.extract_facilities()
-        self.clean_price()
+        # self.clean_price()
 
         self._log("\n" + "=" * 60)
         self._log(f"✨ Data Cleaning Complete!")
