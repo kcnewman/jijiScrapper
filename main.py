@@ -145,12 +145,15 @@ def mode_clean_data():
             .clean_price()
             .remove_sale_and_short_term()
             .select_columns()
+            .clean_locality()
             .get_df()
         )
 
         # 3. SAVE CLEANED VERSION
         df_final.to_csv(clean_file, index=False)
-        log(f"Cleaning Success! {len(df_final)} rows saved to listings_combined.csv")
+        log(
+            f"Cleaning Success! {len(df_final)} rows saved to untouched_raw_original.csv"
+        )
     except Exception as e:
         log(f"Cleaning process failed: {e}", False)
 

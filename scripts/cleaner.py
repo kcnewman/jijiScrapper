@@ -4,7 +4,7 @@ import re
 
 
 class DataCleaner:
-    def __init__(self, df, verbose=True, keep_original_columns=False):
+    def __init__(self, df, verbose=True, keep_original_columns=True):
         self.df = df.copy()
         self.verbose = verbose
         self.keep_original_columns = keep_original_columns
@@ -237,6 +237,30 @@ class DataCleaner:
         self._log(
             f"✅ Final dataset: {len(available_cols)} columns, {len(self.df)} rows"
         )
+        return self
+
+    def clean_locality(self):
+        self._log("📍 Cleaning Locality...")
+        init_len = self.df["locality"].nunique()
+        replacements = {
+            "Dworwulu": "Dzorwulu",
+            "Lartebiokoshie": "Lartebiokorshie",
+            "Ashongman Estate": "Ashongman",
+            "Old Ashongman": "Ashongman",
+            "Greater Accra": "Other",
+            "Ledzokuku-Krowor": "Teshie",
+            "South Shiashie": "East Legon",
+            "Okponglo": "East Legon",
+            "Little Legon": "East Legon",
+            "Abofu": "Achimota",
+            "Akweteyman": "Achimota",
+            "Banana Inn": "Dansoman",
+            "South La": "Labadi",
+            "Bubuashie": "Kaneshie",
+        }
+        self.df["locality"] = self.df["locality"].replace(replacements)
+        fin_len = self.df["locality"].nunique()
+        self._log(f"✅ Reduced locality from {init_len} to {fin_len}")
         return self
 
     def get_df(self):
