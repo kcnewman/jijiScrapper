@@ -262,6 +262,16 @@ class DataCleaner:
             "Bubuashie": "Kaneshie",
         }
         self.df["locality"] = self.df["locality"].replace(replacements)
+        rep2 = {
+            "Circle": "Nkrumah Circle",
+            "Anyaa": "Anyaa Market",
+            "Ridge": "Greater Accra Regional Hospital",
+            "Dome": "Dome Market",
+            "Abokobi": "Abokobi Station",
+            "Nungua": "Nungua Central",
+            "Greater Accra": "Accra",
+        }
+        self.df["loc"] = self.df["locality"].replace(rep2)
         fin_len = self.df["locality"].nunique()
         self._log(f"✅ Reduced locality from {init_len} to {fin_len}")
         return self
